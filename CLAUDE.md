@@ -9,7 +9,7 @@
 3. 새 skill은 `npm run new-skill <이름>`으로 만들고, 폴더명 = frontmatter `name` = `bean-` 접두사를 지킨다. `description`에는 트리거 문구를 구체적으로 쓴다.
 4. 새 에이전트 지원은 `src/adapters/<id>.js` 추가 + `registry.js` 1줄. 오케스트레이터(`src/commands/`, `src/cli.js`)는 수정하지 않는다.
 5. 의존성을 추가하지 않는다(Node 내장 모듈만, Node >= 20.12). 어댑터는 예외를 던지지 않고 `io`(`which/run/home/log`)로만 외부와 통신한다.
-6. 민감 정보(토큰, 내부 호스트, 서버 접속 정보)는 이 공개 레포에 넣지 않는다. 필요해지면 별도 private 레포를 만들어 `--marketplace owner/repo`(또는 `src/adapters/marketplaces.js`)로 추가 등록한다.
+6. 민감 정보(토큰, 내부 호스트, 서버 접속 정보, 회사 기본 정보, 고객사 제안서·보고서 원본)는 이 공개 레포에 넣지 않는다. 회사 기본 정보는 사용자 PC의 로컬 프로필(`~/.beantal/`)에만 두고, skill은 이를 읽기만 한다. `skills/` 안에 pptx, pdf, zip 등 문서 파일이 있으면 `npm run check`가 실패한다. 필요해지면 별도 private 레포를 만들어 `--marketplace owner/repo`(또는 `src/adapters/marketplaces.js`)로 추가 등록한다.
 7. 테스트는 `npm test`(어댑터는 stub `io`). 커밋·push는 사용자가 커밋 컨벤션을 주거나 명시적으로 요청할 때만 한다. 커밋 메시지에 AI 작성 흔적을 남기지 않는다.
 
 ## 명령

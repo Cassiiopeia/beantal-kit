@@ -18,3 +18,17 @@ nul
 
 # projectops 실행 기록
 .github/.projectops/
+
+# 민감 문서 (제안서, 보고서, 회사 자료): 실수 커밋 방지
+*.pptx
+*.ppt
+*.pdf
+*.zip
+*.docx
+*.xlsx
+*.hwp
+*.hwpx
+
+# 로컬 회사 프로필 (레포 밖 ~/.beantal/ 이 기본이지만 혹시 모를 사본)
+.beantal/
+company.yaml

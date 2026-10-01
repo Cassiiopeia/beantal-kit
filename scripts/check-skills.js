@@ -6,6 +6,19 @@ import { parseFrontmatter } from "./lib/frontmatter.js";
 
 export const PREFIX = "bean-";
 
+// 공개 레포·npm 패키지에 실수로 들어가면 안 되는 문서 파일 (제안서, 보고서, 회사 자료 등).
+const DOC_EXT = /\.(pptx?|pdf|zip|docx?|xlsx?|hwpx?)$/i;
+
+function listFiles(dir) {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) out.push(...listFiles(p));
+    else out.push(p);
+  }
+  return out;
+}
+
 export function checkSkills(skillsDir) {
   const errors = [];
   if (!existsSync(skillsDir)) return { ok: false, errors: [`${skillsDir}: skills 폴더가 없습니다`] };
@@ -13,6 +26,9 @@ export function checkSkills(skillsDir) {
     const dir = join(skillsDir, name);
     if (!statSync(dir).isDirectory()) continue;
     if (!name.startsWith(PREFIX)) errors.push(`${name}: 폴더명은 '${PREFIX}'로 시작해야 합니다`);
+    for (const f of listFiles(dir)) {
+      if (DOC_EXT.test(f)) errors.push(`${name}: 문서 파일은 공개 레포에 넣을 수 없습니다 (민감 정보 가능성): ${f.slice(dir.length + 1)}`);
+    }
     const file = join(dir, "SKILL.md");
     if (!existsSync(file)) { errors.push(`${name}: SKILL.md가 없습니다`); continue; }
     const fm = parseFrontmatter(readFileSync(file, "utf8"));

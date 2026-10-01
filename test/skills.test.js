@@ -42,6 +42,36 @@ for (const [label, folder, content, re] of [
   });
 }
 
+for (const file of ["제안서.pptx", "a.PPT", "x/y.pdf", "data.zip", "r.docx", "t.xlsx", "h.hwp"]) {
+  test(`checkSkills: 문서 파일 ${JSON.stringify(file)} 이 skills 안에 있으면 실패`, () => {
+    const root = tmp();
+    put(root, "bean-a", good("bean-a"));
+    const target = join(root, "bean-a", file);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, "x");
+    const r = checkSkills(root);
+    assert.equal(r.ok, false);
+    assert.match(r.errors.join("\n"), /민감|문서 파일/);
+  });
+}
+
+test("checkSkills: 확장자가 아닌 이름 끝(mypdf, zip-helper)은 문서 파일로 오인하지 않는다", () => {
+  const root = tmp();
+  put(root, "bean-a", good("bean-a"));
+  writeFileSync(join(root, "bean-a", "mypdf"), "x");
+  writeFileSync(join(root, "bean-a", "unzip"), "x");
+  assert.equal(checkSkills(root).ok, true);
+});
+
+test("checkSkills: md, js, json 같은 일반 파일은 허용", () => {
+  const root = tmp();
+  put(root, "bean-a", good("bean-a"));
+  mkdirSync(join(root, "bean-a", "scripts"), { recursive: true });
+  writeFileSync(join(root, "bean-a", "scripts", "run.js"), "x");
+  writeFileSync(join(root, "bean-a", "template.example.yaml"), "x");
+  assert.equal(checkSkills(root).ok, true);
+});
+
 test("createSkill: 접두사 자동/중복 방지, check 통과, 재생성 거부", () => {
   const root = tmp();
   createSkill(root, "my-tool");
