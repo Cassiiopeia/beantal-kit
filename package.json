@@ -37,7 +37,7 @@
     "test": "node --test",
     "new-skill": "node scripts/new-skill.js",
     "check": "node scripts/check-skills.js",
-    "prepublishOnly": "npm test && npm run check",
+    "prepublishOnly": "npm run sync-version && npm test && npm run check",
     "sync-version": "node scripts/sync-version.js"
   },
   "dependencies": {}
