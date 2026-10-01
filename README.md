@@ -60,6 +60,7 @@ npm run check               # frontmatter, name, 접두사 검증
 
 - `develop` 브랜치는 projectops 가 만들어 주지 않는다. 처음에 한 번 `git checkout -b develop && git push -u origin develop` 으로 만든다.
 - `main` 에 직접 push 해도 publish 워크플로우는 실행되지만, 새 버전이 아니면 건너뛴다. 릴리스 PR 을 거치지 않은 직접 push 는 안전망(`PROJECT-VERSION-CONTROL`)이 patch 만 올린다. 정식 배포는 릴리스 PR 로 한다.
+- projectops 는 `common/` 워크플로우를 조건 없이 설치한다. 이 레포에서 쓰지 않는 `PROJECT-COMMON-PROJECTS-SYNC-MANAGER`(Projects 연동)는 삭제했으며, projectops 를 다시 실행하면 복원될 수 있으니 그때는 다시 지운다.
 - 필요 Secret: `NPM_TOKEN` (npm 토큰, publish 권한). projectops 는 Secret 을 등록해 주지 않는다.
 - **새 skill 이 사용자에게 전달되려면 버전이 올라가야 한다.** Claude Code 플러그인은 버전별로 캐시되므로 version 이 같으면 `plugin update` 가 새 내용을 가져오지 않을 수 있다.
 - 버전의 단일 기준은 `version.yml` (projectops 가 관리). 수동 동기화는 `npm run sync-version`.
