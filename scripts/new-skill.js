@@ -24,6 +24,21 @@ function configSection(name) {
   ].join("\n");
 }
 
+// 모든 skill 에 들어가는 OS 호환 규칙 (macOS, Windows 양쪽에서 동작해야 한다).
+function osSection() {
+  return [
+    "",
+    "## OS 호환 (macOS, Windows)",
+    "",
+    "- 홈 폴더는 `~`, `$HOME`, `%USERPROFILE%` 로만 표기한다. 드라이브 문자나 사용자 이름이 들어간 절대 경로는 쓰지 않는다 (`npm run check` 가 막는다).",
+    "- 파일 읽기, 쓰기, 수정은 가능하면 agent 도구(Read, Write, Edit)로 한다. 셸 명령은 macOS 와 Windows 에서 똑같이 동작하는 것만 쓴다.",
+    "- Python, Node 같은 실행 환경이 필요하면 이 문서에 필요 조건, 확인 명령, 없을 때의 안내를 적는다. 사용자는 개발자가 아닐 수 있다.",
+    "- 파일은 UTF-8, 줄바꿈은 LF 로 저장한다. 한글 파일명이나 공백이 든 경로는 따옴표로 감싼다.",
+    "- 경로 구분자를 직접 이어 붙이지 말고 도구나 path 함수를 쓴다.",
+    "",
+  ].join("\n");
+}
+
 function configExample(short) {
   return JSON.stringify({
     [short]: {
@@ -58,7 +73,7 @@ description: "이 skill이 언제 쓰이는지 트리거 문구와 함께 구체
 
 1.
 `;
-  writeFileSync(path, body + (config ? configSection(name) : ""));
+  writeFileSync(path, body + osSection() + (config ? configSection(name) : ""));
   if (config) writeFileSync(join(dir, "config.json.example"), configExample(name.slice(PREFIX.length)));
   return { path };
 }

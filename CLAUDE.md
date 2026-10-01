@@ -18,6 +18,12 @@
    - 설정 생성과 보충은 Claude 가 대화로 한다 (비개발자 사용자 전제): 한 번에 한 질문, 기존 값은 덮어쓰지 않고 빠진 키만 보충, 비밀번호와 토큰은 출력 시 마스킹.
    - `npx beantal-kit uninstall` 은 `~/.beantal-kit/` 를 절대 지우지 않는다 (설치기 코드는 파일 삭제 함수를 쓰지 않는다).
    - 설정이 필요한 skill 은 `npm run new-skill <이름> -- --config` 로 만든다 (규약을 지키는 SKILL.md 설정 섹션과 example 뼈대 생성).
+9. **skill 은 macOS 와 Windows 양쪽에서 똑같이 동작해야 한다.** 사용자는 비개발자일 수 있다.
+   - 홈 폴더는 `~`, `$HOME`, `%USERPROFILE%` 같은 환경 기준으로만 표기한다. 드라이브 문자나 사용자 이름이 든 OS 고정 절대 경로(`C:...`, `/Users/...`, `/home/...`)는 `npm run check` 가 실패시킨다.
+   - 파일 조작은 가능한 한 agent 도구(Read, Write, Edit)로 하고, 셸 명령은 macOS 와 Windows(Git Bash, PowerShell)에서 같게 동작하는 것만 쓴다.
+   - 외부 실행 환경(Python, Node 등)이 필요하면 SKILL.md 에 필요 조건, 확인 명령, 없을 때의 안내를 적는다.
+   - 파일은 UTF-8, 줄바꿈 LF, 한글 파일명과 공백 경로는 따옴표로 감싼다. `new-skill` 뼈대에 이 규칙이 들어 있다.
+   - 설치기와 검증은 GitHub Actions(`BEANTAL-CI-MATRIX`)가 Ubuntu, macOS, Windows 에서 교차 검증한다.
 
 ## 명령
 

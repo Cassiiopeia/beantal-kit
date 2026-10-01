@@ -13,6 +13,20 @@ const DOC_EXT = /\.(pptx?|pdf|zip|docx?|xlsx?|hwpx?)$/i;
 const SECRET_LIKE = /(npm_|ghp_|gho_|ghs_|github_pat_|sk-ant-|sk-|AKIA)[A-Za-z0-9_-]{16,}/;
 const ALLOWED_TOP = new Set(["language", "output"]);
 
+// OS 고정 절대 경로 검사 대상(텍스트 파일). 드라이브 경로, /Users/·/home/ 아래 경로는 한쪽 OS 에서만 동작한다.
+const TEXT_EXT = /\.(md|js|mjs|py|sh|ps1|bat|json|ya?ml|txt|example)$/i;
+const WIN_DRIVE = /(?<![A-Za-z0-9_])[A-Za-z]:[\\/]/;
+const POSIX_HOME = /(?<![\w.~$%])\/(Users|home)\/[^\s"'`)\/]+/;
+
+function checkOsPaths(name, dir, errors) {
+  for (const f of listFiles(dir)) {
+    if (!TEXT_EXT.test(f)) continue;
+    const text = readFileSync(f, "utf8");
+    const hit = text.match(WIN_DRIVE) || text.match(POSIX_HOME);
+    if (hit) errors.push(`${name}: OS 고정 절대 경로가 있습니다 (${f.slice(dir.length + 1).replace(/\\/g, "/")}): ${hit[0]}. ~, $HOME, %USERPROFILE% 같은 환경 기준 표기를 쓰세요`);
+  }
+}
+
 function checkConfigExample(name, file, errors) {
   const text = readFileSync(file, "utf8");
   if (SECRET_LIKE.test(text)) errors.push(`${name}: config.json.example 에 실제 토큰처럼 보이는 값이 있습니다. 값은 비워 두세요`);
@@ -49,6 +63,7 @@ export function checkSkills(skillsDir) {
     for (const f of listFiles(dir)) {
       if (basename(f) === "config.json") errors.push(`${name}: ${f.slice(dir.length + 1)} 는 둘 수 없습니다. 설정은 플러그인 밖 ~/.beantal-kit/configs/${name}/config.json 에만 둡니다`);
     }
+    checkOsPaths(name, dir, errors);
     const example = join(dir, "config.json.example");
     if (existsSync(example)) checkConfigExample(name, example, errors);
     const file = join(dir, "SKILL.md");
