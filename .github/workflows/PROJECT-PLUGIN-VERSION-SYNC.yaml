@@ -1,0 +1,65 @@
+# ===================================================================
+# PROJECT-PLUGIN-VERSION-SYNC.yaml
+# version.yml 기준 매니페스트 버전 동기화 (beantal-kit 전용, projectops 가 덮어쓰지 않는 파일명)
+# ===================================================================
+# version.yml 의 version 을 아래 파일에 맞춘다 (scripts/sync-version.js):
+#   package.json, .claude-plugin/plugin.json, .claude-plugin/marketplace.json, .codex-plugin/plugin.json
+#
+# 트리거
+# - main push: 릴리스 PR 머지로 version.yml 이 바뀐 경우
+# - PROJECT-VERSION-CONTROL 완료 후: 안전망이 GITHUB_TOKEN 으로 version.yml 을 올리면 후속 push 이벤트가
+#   발생하지 않으므로 workflow_run 으로 이어 받는다
+# 두 경로 모두 항상 main 최신을 체크아웃하고, 이미 맞으면 커밋하지 않는다(멱등).
+# 커밋 메시지에 [skip ci] 를 붙여 무한 루프를 막는다.
+# ===================================================================
+name: PROJECT-PLUGIN-VERSION-SYNC
+
+concurrency:
+  group: plugin-version-sync
+  cancel-in-progress: false
+
+on:
+  push:
+    branches: ["main"]
+  workflow_run:
+    workflows: ["PROJECT-VERSION-CONTROL"]
+    types: [completed]
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: 매니페스트 버전 동기화
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 버전 동기화
+        run: node scripts/sync-version.js
+
+      - name: 변경사항 커밋
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add package.json .claude-plugin .codex-plugin
+          if git diff --staged --quiet; then
+            echo "이미 동기화되어 있습니다."
+            exit 0
+          fi
+          VERSION=$(node -p "require('./package.json').version")
+          git commit -m "플러그인 매니페스트 버전 동기화: $VERSION [skip ci]"
+          for i in 1 2 3; do
+            git push && exit 0
+            git pull --rebase origin main || { git rebase --abort 2>/dev/null; exit 1; }
+          done
+          echo "::error::push 3회 실패"; exit 1

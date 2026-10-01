@@ -15,3 +15,6 @@ nul
 
 # 로컬 Claude 설정
 .claude/settings.local.json
+
+# projectops 실행 기록
+.github/.projectops/

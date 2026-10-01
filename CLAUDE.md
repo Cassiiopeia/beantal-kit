@@ -4,7 +4,7 @@
 
 ## 규칙
 
-1. 이 레포는 `bean-*` skill 모음이며 버전은 **projectops**가 관리한다. `plugin.json`, `package.json`의 version을 임의로 올리지 않는다.
+1. 버전의 단일 기준은 `version.yml`이며 projectops가 관리한다. `package.json`, `.claude-plugin/*.json`, `.codex-plugin/plugin.json`의 version은 `PROJECT-PLUGIN-VERSION-SYNC` 워크플로우(`scripts/sync-version.js`)가 동기화하므로 직접 고치지 않는다. 새 skill이 사용자에게 전달되려면 버전이 올라가야 한다(Claude Code는 플러그인을 버전별로 캐시).
 2. skill 추가·수정은 `skills/bean-<이름>/SKILL.md`만 건드린다(설치기 코드 수정 금지). 추가 후 `npm run check` 통과가 필수다.
 3. 새 skill은 `npm run new-skill <이름>`으로 만들고, 폴더명 = frontmatter `name` = `bean-` 접두사를 지킨다. `description`에는 트리거 문구를 구체적으로 쓴다.
 4. 새 에이전트 지원은 `src/adapters/<id>.js` 추가 + `registry.js` 1줄. 오케스트레이터(`src/commands/`, `src/cli.js`)는 수정하지 않는다.

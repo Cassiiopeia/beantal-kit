@@ -46,9 +46,16 @@ npm run check               # frontmatter, name, 접두사 검증
 
 - `main` push 시 `PROJECT-NODE-NPM-PUBLISH` 워크플로우가 npm 에 배포한다 (이미 배포된 버전은 건너뜀).
 - 필요 Secret: `NPM_TOKEN` (npm 토큰, publish 권한).
-- **새 skill 이 사용자에게 전달되려면 버전이 올라가야 한다.** Claude Code 플러그인은 버전별로 캐시되므로 version 이 같으면 `plugin update` 가 새 내용을 가져오지 않을 수 있다. push 후 반드시 버전을 올린다.
-- 버전은 projectops 가 관리한다. 직접 올려야 하면 `package.json`, `.claude-plugin/*.json`, `.codex-plugin/plugin.json` 의 version 을 함께 맞춘다.
+- **새 skill 이 사용자에게 전달되려면 버전이 올라가야 한다.** Claude Code 플러그인은 버전별로 캐시되므로 version 이 같으면 `plugin update` 가 새 내용을 가져오지 않을 수 있다.
+- 버전의 단일 기준은 `version.yml` (projectops 가 관리). `PROJECT-PLUGIN-VERSION-SYNC` 워크플로우가 `package.json`, `.claude-plugin/*.json`, `.codex-plugin/plugin.json` 에 자동 반영한다 (수동 실행: `npm run sync-version`).
 
 ## private skill
 
 회사 비공개 skill 은 이 공개 레포에 넣지 않는다. 별도 private 레포(같은 구조)를 만들고 `npx beantal-kit --marketplace owner/private-repo` 로 함께 등록한다. Claude Code 는 로컬 git 인증을 쓰며 자동 업데이트에는 `GITHUB_TOKEN` 이 필요하다.
+
+---
+
+<!-- AUTO-VERSION-SECTION: DO NOT EDIT MANUALLY -->
+## 최신 버전 : v0.1.0
+
+[전체 버전 기록 보기](CHANGELOG.md)
