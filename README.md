@@ -35,6 +35,19 @@ npm run check               # frontmatter, name, 접두사 검증
 
 `SKILL.md`만 추가하고 push 하면 된다. 설치기 코드는 수정하지 않는다.
 
+## skill 설정 (회사 정보 등)
+
+설정이 필요한 skill 은 `npm run new-skill <이름> -- --config` 로 만든다. 설정은 **플러그인 밖 `~/.beantal-kit/`** 에만 저장된다.
+
+```text
+~/.beantal-kit/configs/<skill>/config.json   skill별 설정
+~/.beantal-kit/shared/                        여러 skill 이 함께 쓰는 정보 (회사 기본 정보 등)
+```
+
+- Claude Code 는 플러그인을 버전별 캐시 폴더에 두고 업데이트하면 폴더가 바뀌므로, 플러그인 안에 두면 설정이 사라진 것처럼 보인다. 밖에 두면 **업데이트, 재설치, 제거 후에도 보존**된다. `npx beantal-kit uninstall` 도 이 폴더는 지우지 않는다.
+- 설정이 없으면 Claude 가 질문으로 만들어 준다. 직접 파일을 만들 필요가 없다.
+- 레포의 `config.json.example` 은 값이 빈 템플릿이다. 실제 값(회사 정보, 토큰)은 레포에 올라가지 않는다.
+
 ## 에이전트 추가 (antigravity, pi, cursor 등)
 
 1. `src/adapters/<id>.js` 에 `{ id, label, order, strategy, detect, apply, remove, manualHint }` 객체를 만든다 (`src/adapters/adapter.js` 계약 참고).

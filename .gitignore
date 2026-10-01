@@ -32,3 +32,6 @@ nul
 # 로컬 회사 프로필 (레포 밖 ~/.beantal/ 이 기본이지만 혹시 모를 사본)
 .beantal/
 company.yaml
+
+# skill 설정은 플러그인 밖 ~/.beantal-kit/ 에만 둔다 (example 만 커밋)
+skills/**/config.json
