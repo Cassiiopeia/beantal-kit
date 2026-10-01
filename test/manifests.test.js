@@ -39,6 +39,7 @@ test("CLAUDE.md 와 publish 워크플로우가 존재하고 핵심 규칙을 담
 });
 
 test("package.json 은 의존성 0, files 는 bin/src 만", () => {
-  assert.deepEqual(pkg.dependencies, {});
+  // npm pkg set(배포 워크플로우의 버전 주입)이 빈 dependencies 키를 지우므로 없음도 허용한다.
+  assert.deepEqual(pkg.dependencies ?? {}, {});
   assert.deepEqual(pkg.files, ["bin/", "src/"]);
 });
