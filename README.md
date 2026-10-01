@@ -44,10 +44,25 @@ npm run check               # frontmatter, name, 접두사 검증
 
 ## 배포
 
-- `main` push 시 `PROJECT-NODE-NPM-PUBLISH` 워크플로우가 npm 에 배포한다 (이미 배포된 버전은 건너뜀).
-- 필요 Secret: `NPM_TOKEN` (npm 토큰, publish 권한).
+### 브랜치와 릴리스 흐름
+
+```text
+작업 → develop (커밋 제목 형식 준수) → develop→main 릴리스 PR → 버전 증가 → 동기화 → npm 배포
+```
+
+1. `develop` 에 커밋한다. 제목은 `이슈제목 : feat|fix|docs|... : 설명 이슈URL` 형식이다.
+2. 릴리스 PR(develop → main)을 만든다 (`/pro-changelog-deploy`). 머지 시 릴리스 구간 커밋 제목으로 버전이 정해진다.
+   - `feat` 포함 → minor, `fix` 등만 → patch, `feat!` 처럼 `!` 표기 → major
+3. `PROJECT-PLUGIN-VERSION-SYNC` 가 `package.json`, `.claude-plugin/*.json`, `.codex-plugin/plugin.json` 을 `version.yml` 에 맞춘다.
+4. `PROJECT-NODE-NPM-PUBLISH` 가 npm 에 배포한다 (이미 배포된 버전은 건너뜀).
+
+### 알아둘 점
+
+- `develop` 브랜치는 projectops 가 만들어 주지 않는다. 처음에 한 번 `git checkout -b develop && git push -u origin develop` 으로 만든다.
+- `main` 에 직접 push 해도 publish 워크플로우는 실행되지만, 새 버전이 아니면 건너뛴다. 릴리스 PR 을 거치지 않은 직접 push 는 안전망(`PROJECT-VERSION-CONTROL`)이 patch 만 올린다. 정식 배포는 릴리스 PR 로 한다.
+- 필요 Secret: `NPM_TOKEN` (npm 토큰, publish 권한). projectops 는 Secret 을 등록해 주지 않는다.
 - **새 skill 이 사용자에게 전달되려면 버전이 올라가야 한다.** Claude Code 플러그인은 버전별로 캐시되므로 version 이 같으면 `plugin update` 가 새 내용을 가져오지 않을 수 있다.
-- 버전의 단일 기준은 `version.yml` (projectops 가 관리). `PROJECT-PLUGIN-VERSION-SYNC` 워크플로우가 `package.json`, `.claude-plugin/*.json`, `.codex-plugin/plugin.json` 에 자동 반영한다 (수동 실행: `npm run sync-version`).
+- 버전의 단일 기준은 `version.yml` (projectops 가 관리). 수동 동기화는 `npm run sync-version`.
 
 ## private skill
 
