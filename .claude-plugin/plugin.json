@@ -1,0 +1,10 @@
+{
+  "name": "beantal-kit",
+  "description": "빈털 전용 업무 skill 모음 (bean-*)",
+  "version": "0.1.0",
+  "author": { "name": "Cassiiopeia", "url": "https://github.com/Cassiiopeia" },
+  "homepage": "https://github.com/Cassiiopeia/beantal-kit",
+  "repository": "https://github.com/Cassiiopeia/beantal-kit",
+  "license": "MIT",
+  "keywords": ["skills", "workflow", "claude-code", "codex"]
+}

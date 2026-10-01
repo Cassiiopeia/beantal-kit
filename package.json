@@ -1,0 +1,22 @@
+{
+  "name": "beantal-kit",
+  "version": "0.1.0",
+  "description": "빈털 전용 Claude Code·Codex skill 키트 — npx beantal-kit 으로 마켓플레이스 등록",
+  "keywords": ["claude-code", "codex", "skills", "agent-skills", "plugin-marketplace"],
+  "license": "MIT",
+  "author": { "name": "Cassiiopeia", "url": "https://github.com/Cassiiopeia" },
+  "homepage": "https://github.com/Cassiiopeia/beantal-kit",
+  "repository": { "type": "git", "url": "git+https://github.com/Cassiiopeia/beantal-kit.git" },
+  "bugs": { "url": "https://github.com/Cassiiopeia/beantal-kit/issues" },
+  "type": "module",
+  "bin": { "beantal-kit": "bin/beantal-kit.js" },
+  "files": ["bin/", "src/"],
+  "engines": { "node": ">=20.12" },
+  "scripts": {
+    "test": "node --test",
+    "new-skill": "node scripts/new-skill.js",
+    "check": "node scripts/check-skills.js",
+    "prepublishOnly": "npm test && npm run check"
+  },
+  "dependencies": {}
+}
