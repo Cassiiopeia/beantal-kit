@@ -1,6 +1,6 @@
 {
   "name": "beantal-kit",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "빈털 전용 업무 skill 모음 (bean-*)",
   "skills": "./skills/"
 }
