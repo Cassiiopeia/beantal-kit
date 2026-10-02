@@ -1,0 +1,452 @@
+"""outline.md → pptx. 템플릿 없이 하우스 스타일(config)로 그린다.
+
+레이아웃 원칙 (references/page-types.md):
+- 본문 슬라이드는 공통 헤더(섹션명 · 번호 · 제목 · 메시지) + 본문 영역(body_top ~ 하단 1.0cm)
+- 본문 요소는 내용 양에 맞춰 높이를 잡고, 남는 공간은 요소 사이에 고르게 나눈다 (위로 몰지 않는다)
+- C01 은 [핵심 과제 | 대응 역량] 2단 + 하단 [제안 방향 3대 축] 전용 배치
+"""
+import re
+
+from pptx import Presentation
+from pptx.chart.data import CategoryChartData
+from pptx.dml.color import RGBColor
+from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.util import Cm, Pt
+
+from . import fonts as fontcheck
+
+DEFAULT_HEADER = {
+    "section_label": {"left": 2.8, "top": 0.0, "width": 15.2, "height": 0.7, "size": 11, "font": "label", "color": "muted"},
+    "number": {"left": 0.4, "top": 0.5, "width": 2.2, "height": 1.3, "size": 32, "font": "title", "color": "primary"},
+    "title": {"left": 2.7, "top": 0.8, "width": 16.8, "height": 1.1, "size": 24, "font": "title", "color": "primary"},
+    "client_mark": {"left": 22.7, "top": 0.6, "width": 4.1, "height": 0.9, "size": 14, "font": "emphasis", "color": "primary"},
+    "message": {"left": 1.1, "top": 2.2, "width": 25.3, "height": 1.4, "size": 14, "font": "emphasis", "color": "primary", "bold": True},
+    "body_top": 3.9,
+}
+DEFAULT_FONTS = {"title": "G마켓 산스 Bold", "body": "Pretendard Light", "emphasis": "Pretendard Medium", "label": "Pretendard SemiBold"}
+DEFAULT_COLORS = {"primary": "1B2D4F", "accent": "009FE3", "text": "444444", "muted": "A5ABBD", "white": "FFFFFF"}
+LIGHT_FILL = "F2F4F8"
+GRID = "D9DDE5"
+CHECK = re.compile(r"\[확인 ?필요[^\]]*\]")
+HEX = re.compile(r"[0-9A-Fa-f]{6}")
+LINE_H = 0.0353 * 1.45          # pt → cm 줄 높이 계수
+
+
+class Style:
+    def __init__(self, cfg):
+        cfg = cfg or {}
+        wanted = {**DEFAULT_FONTS, **{k: v for k, v in (cfg.get("fonts") or {}).items() if v}}
+        self.fonts, self.font_swaps = fontcheck.resolve(wanted)
+        self.colors = {**DEFAULT_COLORS, **{k: v for k, v in (cfg.get("colors") or {}).items() if v}}
+        hdr = dict(DEFAULT_HEADER)
+        for k, v in (cfg.get("header") or {}).items():
+            hdr[k] = {**hdr.get(k, {}), **{kk: vv for kk, vv in v.items() if not kk.startswith("_")}} if isinstance(v, dict) else v
+        self.header = hdr
+        self.size = cfg.get("slide_size_cm") or [27.5, 19.05]
+
+    def font(self, key):
+        return self.fonts.get(key, key)
+
+    def color(self, key):
+        val = self.colors.get(key, key)
+        return RGBColor.from_string(val if HEX.fullmatch(val or "") else DEFAULT_COLORS["text"])
+
+
+def lines_needed(text, width_cm, size):
+    char_w = size * 0.0353 * 0.95
+    per_line = max(1, int(width_cm / char_w))
+    return sum(max(1, -(-len(t) // per_line)) for t in text.split("\n"))
+
+
+def _fit_size(text, width_cm, height_cm, size, min_size=9):
+    while size > min_size and lines_needed(text, width_cm, size) * size * LINE_H > height_cm:
+        size -= 1
+    return size
+
+
+def text(slide, st, left, top, width, height, value, size=11, font="body", color="text", bold=False,
+         align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, fit=True, spacing=None):
+    box = slide.shapes.add_textbox(Cm(left), Cm(top), Cm(width), Cm(height))
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.margin_left = tf.margin_right = Cm(0.1)
+    tf.margin_top = tf.margin_bottom = Cm(0.05)
+    tf.vertical_anchor = anchor
+    lines = value if isinstance(value, list) else str(value).split("\n")
+    if fit:
+        size = _fit_size("\n".join(lines), width - 0.2, height, size)
+    for i, ln in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = align
+        if spacing:
+            p.space_after = Pt(spacing)
+        r = p.add_run()
+        r.text = ln
+        r.font.size = Pt(size)
+        r.font.name = st.font(font)
+        r.font.bold = bold
+        r.font.color.rgb = st.color("accent") if CHECK.search(ln) else st.color(color)
+    return box
+
+
+def rect(slide, st, left, top, width, height, fill, line=None, shape=MSO_SHAPE.RECTANGLE):
+    r = slide.shapes.add_shape(shape, Cm(left), Cm(top), Cm(width), Cm(height))
+    r.fill.solid()
+    r.fill.fore_color.rgb = RGBColor.from_string(fill) if HEX.fullmatch(fill) else st.color(fill)
+    if line:
+        r.line.color.rgb = st.color(line)
+        r.line.width = Pt(0.75)
+    else:
+        r.line.fill.background()
+    r.shadow.inherit = False
+    return r
+
+
+def label_in(shape, st, value, size, color="white", font="emphasis", bold=True):
+    tf = shape.text_frame
+    tf.word_wrap = True
+    tf.margin_left = tf.margin_right = Cm(0.05)
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    r = p.add_run()
+    r.text = value
+    r.font.size = Pt(size)
+    r.font.name = st.font(font)
+    r.font.bold = bold
+    r.font.color.rgb = st.color(color)
+
+
+# ---------------------------------------------------------------- 헤더 · 공통
+
+def header(slide, st, sec_num, sec_label, title, message, client_mark=None):
+    h = st.header
+
+    def put(key, value):
+        spec = h[key]
+        text(slide, st, spec["left"], spec["top"], spec["width"], spec["height"], value, size=spec["size"],
+             font=spec["font"], color=spec["color"], bold=spec.get("bold", False), fit=False)
+    if sec_label:
+        put("section_label", sec_label)
+    if sec_num is not None:
+        put("number", f"{sec_num:02d}.")
+    if title:
+        put("title", title)
+    if client_mark:
+        put("client_mark", client_mark)
+    if message:
+        spec = h["message"]
+        text(slide, st, spec["left"], spec["top"], spec["width"], spec["height"], message, size=spec["size"],
+             font=spec["font"], color=spec["color"], bold=spec.get("bold", True), fit=True)
+        y = spec["top"] + spec["height"] + 0.1
+        line = slide.shapes.add_connector(1, Cm(spec["left"]), Cm(y), Cm(spec["left"] + spec["width"]), Cm(y))
+        line.line.color.rgb = st.color("muted")
+        line.line.width = Pt(0.5)
+
+
+def page_number(slide, st, n):
+    W, H = st.size
+    text(slide, st, W - 2.0, H - 0.8, 1.6, 0.5, str(n), size=9, color="muted", align=PP_ALIGN.RIGHT, fit=False)
+
+
+# ---------------------------------------------------------------- 본문 구성 요소 (각 함수는 쓴 높이를 돌려준다)
+
+def _groups(items):
+    groups, cur = [], None
+    for it in items or []:
+        m = re.match(r"^【\s*(.+?)\s*】\s*(.*)$", it)
+        if m:
+            cur = {"title": m.group(1), "items": [m.group(2)] if m.group(2) else []}
+            groups.append(cur)
+        else:
+            if cur is None:
+                cur = {"title": None, "items": []}
+                groups.append(cur)
+            cur["items"].append(it)
+    return groups
+
+
+def _card(slide, st, g, x, y, w, h, size=13, highlight=False):
+    rect(slide, st, x, y, w, h, LIGHT_FILL, line="accent" if highlight else None)
+    rect(slide, st, x, y, w, 0.12, "accent" if highlight else "primary")
+    if highlight:
+        badge = rect(slide, st, x + w - 2.6, y + 0.3, 2.3, 0.7, "accent", shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+        label_in(badge, st, "권고안", 11)
+    top = y + 0.35
+    if g["title"]:
+        text(slide, st, x + 0.4, top, w - 0.8, 0.8, g["title"], size=size + 1, font="emphasis", color="primary", bold=True, fit=False)
+        top += 1.0
+    text(slide, st, x + 0.4, top, w - 0.8, h - (top - y) - 0.3, [f"· {t}" for t in g["items"]], size=size, spacing=6)
+
+
+def card_height(g, w, size=13):
+    body = "\n".join(f"· {t}" for t in g["items"])
+    n = lines_needed(body, w - 1.0, size)
+    return 0.35 + (1.0 if g["title"] else 0) + n * size * LINE_H * 1.25 + 0.5
+
+
+MIN_CARD = 4.2      # 카드가 너무 납작해 보이지 않게 하는 최소 높이(cm)
+
+
+def recommended_index(groups, message):
+    """비교안(C07)에서 권고안 찾기: 그룹 제목의 '권고·추천' 표시, 또는 메시지의 'N안으로/N안을'."""
+    for i, g in enumerate(groups):
+        if g["title"] and re.search(r"(권고|추천)", g["title"]):
+            return i
+    m = re.search(r"(\d)\s*안\s*(으로|을|를|이)\s*(운영|추천|권고|제안|시작|진행)", message or "")
+    if m:
+        for i, g in enumerate(groups):
+            if g["title"] and re.match(rf"^{m.group(1)}\s*안", g["title"]):
+                return i
+    return None
+
+
+def body_groups(slide, st, items, left, top, width, height, dry=False, message=None):
+    groups = _groups(items)
+    if not groups:
+        return 0
+    titled = [g for g in groups if g["title"]]
+    if len(titled) >= 2 and len(groups) <= 4:
+        gap = 0.5
+        n = len(groups)
+        w = (width - gap * (n - 1)) / n
+        h = min(height, max(MIN_CARD, max(card_height(g, w) for g in groups)))
+        rec = recommended_index(groups, message) if message is not None else None
+        if not dry:
+            for i, g in enumerate(groups):
+                _card(slide, st, g, left + i * (w + gap), top, w, h, highlight=(i == rec))
+        return h
+    lines = []
+    for g in groups:
+        if g["title"]:
+            lines.append(f"【 {g['title']} 】")
+        lines += [f"· {t}" for t in g["items"]]
+    need = min(height, lines_needed("\n".join(lines), width, 13) * 13 * LINE_H * 1.3 + 0.4)
+    if not dry:
+        text(slide, st, left, top, width, need, lines, size=13, spacing=4)
+    return need
+
+
+def body_c01(slide, st, items, left, top, width, height, dry=False):
+    """핵심 과제 | 대응 역량 2단 + 하단 3대 축. 그룹이 3개가 아니면 일반 카드로."""
+    groups = _groups(items)
+    if len(groups) != 3 or not all(g["title"] for g in groups):
+        return body_groups(slide, st, items, left, top, width, height, dry)
+    gap = 0.5
+    axis_h = 3.2
+    w = (width - gap) / 2
+    upper_h = min(height - axis_h - 0.9, max(MIN_CARD, max(card_height(g, w) for g in groups[:2])))
+    if dry:
+        return upper_h + 0.9 + axis_h
+    for i, g in enumerate(groups[:2]):
+        _card(slide, st, g, left + i * (w + gap), top, w, upper_h)
+    # 화살표 → 3대 축
+    arrow = rect(slide, st, left + width / 2 - 0.6, top + upper_h + 0.1, 1.2, 0.6, "muted", shape=MSO_SHAPE.DOWN_ARROW)
+    y = top + upper_h + 0.8
+    axis = groups[2]
+    text(slide, st, left, y, width, 0.7, f"【 {axis['title']} 】", size=13, font="emphasis", color="primary", bold=True, fit=False)
+    items3 = axis["items"][:4]
+    n = max(1, len(items3))
+    aw = (width - gap * (n - 1)) / n
+    for i, it in enumerate(items3):
+        box = rect(slide, st, left + i * (aw + gap), y + 0.8, aw, axis_h - 0.9, "primary")
+        label_in(box, st, it, _fit_size(it, aw - 0.4, axis_h - 1.2, 15), font="emphasis")
+    return upper_h + 0.9 + axis_h
+
+
+def body_table(slide, st, rows, left, top, width, height, dry=False):
+    if not rows:
+        return 0
+    nrows, ncols = len(rows), max(len(r) for r in rows)
+    size = 12 if nrows <= 6 else (11 if nrows <= 9 else 10)
+    row_h = max(0.9, min(1.6, height / nrows))
+    if dry:
+        return row_h * nrows
+    shape = slide.shapes.add_table(nrows, ncols, Cm(left), Cm(top), Cm(width), Cm(row_h * nrows))
+    tbl = shape.table
+    first = 0.28 if ncols >= 3 else 0.32
+    widths = [width * first] + [width * (1 - first) / (ncols - 1)] * (ncols - 1) if ncols > 1 else [width]
+    for j, w in enumerate(widths):
+        tbl.columns[j].width = Cm(w)
+    for i in range(nrows):
+        tbl.rows[i].height = Cm(row_h)
+    for i, row in enumerate(rows):
+        for j in range(ncols):
+            cell = tbl.cell(i, j)
+            val = row[j] if j < len(row) else ""
+            cell.text = ""
+            p = cell.text_frame.paragraphs[0]
+            r = p.add_run()
+            r.text = val
+            r.font.size = Pt(size)
+            r.font.name = st.font("emphasis" if i == 0 or j == 0 else "body")
+            r.font.bold = i == 0
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            cell.margin_left = cell.margin_right = Cm(0.25)
+            cell.fill.solid()
+            if i == 0:
+                r.font.color.rgb = st.color("white")
+                cell.fill.fore_color.rgb = st.color("primary")
+                p.alignment = PP_ALIGN.CENTER
+            else:
+                r.font.color.rgb = st.color("accent") if CHECK.search(val) else st.color("primary" if j == 0 else "text")
+                cell.fill.fore_color.rgb = RGBColor.from_string("FFFFFF" if i % 2 else LIGHT_FILL)
+    return row_h * nrows
+
+
+def body_steps(slide, st, steps, left, top, width, height, dry=False):
+    parsed = [(n.strip(), d.strip()) for n, _, d in (s.partition("|") for s in steps)]
+    if not parsed:
+        return 0
+    n = len(parsed)
+    gap = 0.25
+    w = (width - gap * (n - 1)) / n
+    chev_h = 1.5
+    name_size = min(_fit_size(f"{i + 1:02d} {nm}", w - 1.4, 0.7, 14) for i, (nm, _) in enumerate(parsed))
+    descs = [[f"· {d.strip()}" for d in re.split(r"\s*;\s*", desc) if d.strip()] for _, desc in parsed]
+    need = max([lines_needed("\n".join(d), w - 0.6, 12) for d in descs] + [1]) * 12 * LINE_H * 1.3 + 0.8
+    card_h = min(height - chev_h - 0.3, max(need, MIN_CARD))
+    if dry:
+        return chev_h + 0.3 + card_h
+    for i, (name, _) in enumerate(parsed):
+        x = left + i * (w + gap)
+        chev = rect(slide, st, x, top, w, chev_h, "primary" if i == 0 else "accent",
+                    shape=MSO_SHAPE.PENTAGON if i == 0 else MSO_SHAPE.CHEVRON)
+        label_in(chev, st, f"{i + 1:02d} {name}", name_size)
+        if descs[i]:
+            rect(slide, st, x, top + chev_h + 0.3, w, card_h, LIGHT_FILL)
+            text(slide, st, x + 0.25, top + chev_h + 0.55, w - 0.5, card_h - 0.4, descs[i], size=12, spacing=6)
+    return chev_h + 0.3 + card_h
+
+
+def body_chart(slide, st, rows, left, top, width, height, dry=False):
+    if not rows or len(rows) < 2:
+        return 0
+    if dry:
+        return height
+    head, data = rows[0], rows[1:]
+    cd = CategoryChartData(number_format="#,##0")
+    cd.categories = [r[0] for r in data]
+    for j, name in enumerate(head[1:], start=1):
+        vals = []
+        for r in data:
+            try:
+                vals.append(float(str(r[j]).replace(",", "")))
+            except (ValueError, IndexError):
+                vals.append(0)
+        cd.add_series(name, vals)
+    gf = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Cm(left), Cm(top), Cm(width), Cm(height), cd)
+    ch = gf.chart
+    ch.has_legend = len(head) > 2
+    if ch.has_legend:
+        ch.legend.position = XL_LEGEND_POSITION.TOP
+        ch.legend.include_in_layout = False
+        ch.legend.font.size = Pt(11)
+    va = ch.value_axis
+    va.has_major_gridlines = True
+    va.major_gridlines.format.line.color.rgb = RGBColor.from_string(GRID)
+    va.format.line.fill.background()
+    va.tick_labels.number_format = "#,##0"
+    va.tick_labels.number_format_is_linked = False
+    va.tick_labels.font.size = Pt(10)
+    ch.category_axis.tick_labels.font.size = Pt(11)
+    ch.category_axis.format.line.color.rgb = RGBColor.from_string(GRID)
+    palette = [st.colors["primary"], st.colors["accent"], st.colors["muted"], "6B7A99"]
+    for i, s in enumerate(ch.series):
+        s.format.fill.solid()
+        s.format.fill.fore_color.rgb = RGBColor.from_string(palette[i % len(palette)])
+    ch.plots[0].gap_width = 60
+    ch.font.name = st.font("body")
+    return height
+
+
+# ---------------------------------------------------------------- 유형별 슬라이드
+
+def _section_parts(sec):
+    m = re.match(r"^\s*(\d{1,2})\s*\.?\s*(.*)$", sec or "")
+    return (int(m.group(1)), m.group(2).strip()) if m else (None, (sec or "").strip())
+
+
+def render(outline, cfg=None, out_path="deck.pptx", client_mark=None):
+    st = Style(cfg)
+    prs = Presentation()
+    W, H = st.size
+    prs.slide_width, prs.slide_height = Cm(W), Cm(H)
+    blank = prs.slide_layouts[6]
+    meta = outline["meta"]
+    sections = []
+    for s in outline["slides"]:
+        num, name = _section_parts(s.get("섹션"))
+        if num is not None and (num, name) not in sections:
+            sections.append((num, name))
+    hdr = st.header
+    body_left, body_top = hdr["message"]["left"], hdr["body_top"]
+    body_w, body_h = hdr["message"]["width"], H - body_top - 1.1
+    made = []
+    for s in outline["slides"]:
+        if not s.get("type"):
+            continue
+        slide = prs.slides.add_slide(blank)
+        t = s["type"]
+        if t == "T01":
+            rect(slide, st, 0, 0, 1.2, H, "primary")
+            text(slide, st, 2.5, 5.2, W - 5, 1.0, meta.get("고객사", ""), size=16, font="emphasis", color="muted", fit=False)
+            text(slide, st, 2.5, 6.4, W - 5, 3.2, meta.get("건명", meta.get("title", "")), size=32, font="title", color="primary")
+            if s.get("메시지"):
+                text(slide, st, 2.5, 9.9, W - 5, 1.6, s["메시지"], size=15, font="emphasis", color="text")
+            text(slide, st, 2.5, H - 3.0, 10, 0.8, meta.get("날짜", ""), size=12, color="muted", fit=False)
+            if meta.get("제안사"):
+                text(slide, st, W - 9, H - 3.0, 7, 0.8, meta["제안사"], size=12, font="emphasis", color="primary", align=PP_ALIGN.RIGHT, fit=False)
+        elif t == "T02":
+            text(slide, st, 1.5, 1.2, 10, 1.4, "목차", size=28, font="title", color="primary", fit=False)
+            per_col = 7
+            for i, (num, name) in enumerate(sections):
+                col, row = divmod(i, per_col)
+                x = 2.0 + col * 12.5
+                y = 3.8 + row * 1.9
+                text(slide, st, x, y, 1.8, 1.0, f"{num:02d}", size=22, font="title", color="accent", fit=False)
+                text(slide, st, x + 2.0, y + 0.15, 10, 1.0, name, size=17, font="emphasis", color="primary", fit=False)
+                rect(slide, st, x, y + 1.4, 11.5, 0.03, GRID)
+        elif t == "T03":
+            num, name = _section_parts(s.get("섹션"))
+            rect(slide, st, 0, 0, W, H, "primary")
+            if num is not None:
+                text(slide, st, 2.5, H / 2 - 2.6, 6, 2.0, f"{num:02d}", size=54, font="title", color="accent", fit=False)
+            text(slide, st, 2.5, H / 2 - 0.4, W - 5, 1.6, name or s.get("제목", ""), size=30, font="title", color="white", fit=False)
+        elif t == "T04":
+            text(slide, st, 0, H / 2 - 1.2, W, 2.0, s.get("제목") or "감사합니다.", size=36, font="title", color="primary", align=PP_ALIGN.CENTER, fit=False)
+            if s.get("메시지"):
+                text(slide, st, 2, H / 2 + 1.0, W - 4, 1.2, s["메시지"], size=14, font="emphasis", color="text", align=PP_ALIGN.CENTER)
+        else:
+            num, name = _section_parts(s.get("섹션"))
+            header(slide, st, num, name, s.get("제목"), s.get("메시지"), client_mark)
+            parts = [k for k in ("본문", "표", "단계", "데이터") if s.get(k)]
+            if t[0] == "L" and not parts:
+                text(slide, st, body_left, body_top + 2, body_w, 2, "[확인 필요: 회사 소개 라이브러리 장표 삽입 — library.json company-intro]", size=14)
+            if t == "C01":
+                body_fn = body_c01
+            elif t == "C07":
+                body_fn = lambda *a, **k: body_groups(*a, message=s.get("메시지"), **k)
+            else:
+                body_fn = body_groups
+            draw = {"본문": body_fn, "표": body_table, "단계": body_steps, "데이터": body_chart}
+
+            def layout(dry, y0):
+                y, remain = y0, body_h - 0.2
+                for i, k in enumerate(parts):
+                    last = i == len(parts) - 1
+                    avail = remain if last else remain * (0.45 if k == "본문" else 0.55)
+                    used = draw[k](slide, st, s[k], body_left, y, body_w, avail, dry=dry)
+                    y += used + 0.5
+                    remain -= used + 0.5
+                return y - y0 - 0.5
+            total = layout(True, 0)
+            free = max(0.0, body_h - 0.2 - total)
+            layout(False, body_top + 0.2 + free * 0.3)   # 남는 공간은 위 30% · 아래 70% 로 나눈다
+        if t not in ("T01", "T03"):
+            page_number(slide, st, len(prs.slides))
+        made.append({"n": len(prs.slides), "outline_n": s.get("n"), "type": t})
+    prs.save(out_path)
+    return {"slides": len(prs.slides), "made": made, "font_swaps": st.font_swaps}

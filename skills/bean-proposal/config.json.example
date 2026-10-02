@@ -1,0 +1,24 @@
+{
+  "proposal": {
+    "_comment_project_root": "제안서 작업을 모아 두는 최상위 폴더. 첫 실행 때 후보 폴더를 찾아 보여 주고 사용자가 고른다. 예: ~/Desktop/제안서",
+    "project_root": "",
+    "_comment_project_layout": "루트 아래 정리 규칙. {client} 고객사, {yymmdd} 시작일, {title} 건명. 첫 실행 때 기존 폴더 구조를 보고 추정한 뒤 사용자에게 확인한다. 예: {client}/{yymmdd}_{title}",
+    "project_layout": "{client}/{yymmdd}_{title}",
+    "_comment_existing_rule": "사용자가 원래 쓰던 정리 방식 설명 (자유 서술). 예: 고객사별 폴더에 RFP·제안서 버전을 함께 둔다",
+    "existing_rule": "",
+    "_comment_reference_dirs": "참고 제안서가 모여 있는 폴더 목록 (읽기만 한다)",
+    "reference_dirs": [],
+    "_comment_slide_size_cm": "슬라이드 크기 [가로, 세로] cm. 기본은 A4 가로에 가까운 27.5 x 19.05",
+    "slide_size_cm": [27.5, 19.05],
+    "_comment_fonts": "하우스 폰트. title 제목·번호, body 본문, emphasis 강조·메시지, label 섹션명",
+    "fonts": { "title": "", "body": "", "emphasis": "", "label": "" },
+    "_comment_colors": "하우스 색 (# 없이 6자리). primary 제목·메시지, accent 강조, text 본문, muted 보조",
+    "colors": { "primary": "", "accent": "", "text": "", "muted": "", "white": "FFFFFF" },
+    "_comment_header": "본문 슬라이드 상단 요소의 위치·크기(cm)와 서식. 비워 두면 기본값을 쓴다. 기존 제안서가 있으면 profile 명령으로 실측해 채운다",
+    "header": {},
+    "_comment_template_reference": "기준으로 삼는 기존 제안서 경로 (읽기만 한다)",
+    "template_reference": ""
+  },
+  "_required": ["proposal.project_root", "proposal.project_layout"],
+  "language": "ko"
+}

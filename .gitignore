@@ -1,6 +1,10 @@
 # 설계·계획 문서 (로컬 전용)
 docs/
 
+# Python (skill 스크립트 실행 시 생기는 캐시)
+__pycache__/
+*.pyc
+
 # Node
 node_modules/
 npm-debug.log*
