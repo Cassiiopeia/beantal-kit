@@ -44,7 +44,7 @@ def expand(p):
 
 def need_libs():
     missing = []
-    for mod, pkg in (("pptx", "python-pptx"), ("docx", "python-docx"), ("openpyxl", "openpyxl"), ("pypdf", "pypdf")):
+    for mod, pkg in (("pptx", "python-pptx"), ("docx", "python-docx"), ("openpyxl", "openpyxl"), ("pypdf", "pypdf"), ("pypdfium2", "pypdfium2")):
         try:
             __import__(mod)
         except ImportError:
@@ -151,7 +151,7 @@ def _lines(d):
             out += ["| " + " | ".join(r) + " |" for r in rows]
     elif d["format"] == "pdf":
         for pg in d["pages"]:
-            out.append(f"[p{pg['n']}]")
+            out.append(f"[p{pg['n']}]" + (f" ⚠ 그림 있음 ({', '.join(pg['visual_reasons'])}) — 글자로 안 읽힘, pdf-view 로 봐야 함" if pg.get("visual") else ""))
             out += [x for x in pg["text"].splitlines() if x.strip()]
     elif d["format"] == "pptx":
         for s in _brief_pptx(d):
@@ -185,8 +185,14 @@ def cmd_read(a):
         body = {"slides": _brief_pptx(d), "size_cm": d["size_cm"], "masters": d.get("masters")}
     else:
         body = {k: v for k, v in d.items() if k not in ("path",)}
-    return emit({"ok": True, "code": "read", "summary": f"{d['format']} 읽음 (DRM {'예' if d.get('drm') else '아니오'}, {d.get('via')} 로 읽음)",
-                 "drm": d.get("drm"), "via": d.get("via"), "tried": d.get("tried"), **body})
+    extra = {}
+    if d.get("visual_pages"):
+        vp = ",".join(map(str, d["visual_pages"]))
+        extra = {"visual_pages": d["visual_pages"],
+                 "must_view": f"{len(d['visual_pages'])}쪽에 그림·도형이 있어 글자만으로는 내용이 빠집니다. 요건 목록을 쓰기 전에 `pdf-view <파일> --pages {vp}` 로 이미지를 만들어 Read 로 보고, 읽은 내용을 requirements.md 의 '그림 확인' 절에 적으세요."}
+    return emit({"ok": True, "code": "read", "summary": f"{d['format']} 읽음 (DRM {'예' if d.get('drm') else '아니오'}, {d.get('via')} 로 읽음)"
+                 + (f" · 그림 있는 쪽 {len(d['visual_pages'])}개 확인 필요" if d.get("visual_pages") else ""),
+                 "drm": d.get("drm"), "via": d.get("via"), "tried": d.get("tried"), **extra, **body})
 
 
 def cmd_probe(a):
@@ -253,6 +259,29 @@ def cmd_snapshot(a):
         files = [files]
     return emit({"ok": True, "code": "snapshot", "summary": f"이미지 {len(files)}장", "dir": str(out), "files": files, "drm": drm,
                  "next": "Read 로 이미지를 보고 레이아웃을 검토" + (" — 검토 후 이 폴더를 지운다 (DRM 덱)" if drm else "")})
+
+
+def cmd_pdf_view(a):
+    """PDF 의 지정한 쪽을 이미지로 만든다. 그림·표·흐름도는 글자로 안 읽히므로 Read 로 직접 본다. 시스템 임시 폴더에만 만든다."""
+    import tempfile
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return emit({"ok": False, "code": "missing_dependency", "summary": "pypdfium2 가 없습니다", "next": "pip install pypdfium2"})
+    src = expand(a.file)
+    out = Path(tempfile.gettempdir()) / "bean-proposal-pdfview" / src.stem
+    out.mkdir(parents=True, exist_ok=True)
+    pdf = pdfium.PdfDocument(str(src))
+    total = len(pdf)
+    want = sorted({int(x) for x in re.split(r"[,\s]+", a.pages) if x}) if a.pages else list(range(1, total + 1))
+    files = []
+    for n in want:
+        if 1 <= n <= total:
+            f = out / f"p{n:02d}.png"
+            pdf[n - 1].render(scale=a.scale).to_pil().save(f)
+            files.append(str(f))
+    return emit({"ok": True, "code": "pdf_view", "summary": f"{len(files)}쪽 이미지 (전체 {total}쪽)", "dir": str(out), "files": files,
+                 "next": "Read 로 각 이미지를 열어 내용을 requirements.md 에 옮긴다. 다 본 뒤 이 폴더를 지운다 (DRM 문서일 수 있음)"})
 
 
 def cmd_outline_renumber(a):
@@ -411,6 +440,7 @@ def main():
     p.add_argument("--offset", type=int, default=0); p.add_argument("--max-chars", type=int, default=15000); p.set_defaults(fn=cmd_read)
     p = sp.add_parser("profile"); p.add_argument("file"); p.set_defaults(fn=cmd_profile)
     p = sp.add_parser("outline-check"); p.add_argument("outline"); p.add_argument("--requirements"); p.set_defaults(fn=cmd_outline_check)
+    p = sp.add_parser("pdf-view"); p.add_argument("file"); p.add_argument("--pages"); p.add_argument("--scale", type=float, default=1.6); p.set_defaults(fn=cmd_pdf_view)
     p = sp.add_parser("snapshot"); p.add_argument("file"); p.add_argument("--out"); p.add_argument("--slides"); p.set_defaults(fn=cmd_snapshot)
     p = sp.add_parser("outline-renumber"); p.add_argument("outline"); p.set_defaults(fn=cmd_outline_renumber)
     p = sp.add_parser("render"); p.add_argument("outline"); p.add_argument("--out", required=True); p.add_argument("--project"); p.add_argument("--change"); p.add_argument("--client-mark"); p.set_defaults(fn=cmd_render)

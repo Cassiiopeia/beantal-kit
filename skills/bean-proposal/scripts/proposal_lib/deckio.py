@@ -5,6 +5,7 @@
   복호화된 사본을 디스크에 만들지 않는다.
 """
 import json
+import re
 import os
 import platform
 import re
@@ -283,13 +284,40 @@ def read_xlsx(path):
     return {"format": "xlsx", "sheets": sheets}
 
 
+def _pdf_visual(pg, text):
+    """글자로 안 읽히는 그림·도형이 있는 쪽인지 본다. (이미지 개수, 벡터 도형 연산 수)로 판단한다."""
+    try:
+        n_img = len(pg.images)
+    except Exception:
+        n_img = 0
+    n_vec = 0
+    try:
+        data = pg.get_contents().get_data() if pg.get_contents() else b""
+        n_vec = len(re.findall(rb"(?m)\s(?:re|c|l)\s*$", data))
+    except Exception:
+        pass
+    reasons = []
+    if n_img:
+        reasons.append(f"이미지 {n_img}개")
+    if n_vec >= 40:
+        reasons.append(f"도형·선 {n_vec}개 (표·흐름도일 수 있음)")
+    if len(text) < 80:
+        reasons.append("글자가 거의 없음")
+    return {"images": n_img, "vectors": n_vec, "reasons": reasons}
+
+
 def read_pdf(path):
     from pypdf import PdfReader
     r = PdfReader(path)
-    pages = [{"n": i, "text": (pg.extract_text() or "").strip()} for i, pg in enumerate(r.pages, 1)]
+    pages = []
+    for i, pg in enumerate(r.pages, 1):
+        text = (pg.extract_text() or "").strip()
+        v = _pdf_visual(pg, text)
+        pages.append({"n": i, "text": text, "images": v["images"], "visual": bool(v["images"] or v["vectors"] >= 40 or len(text) < 80),
+                      "visual_reasons": v["reasons"]})
     if not any(p["text"] for p in pages):
         raise ValueError("글자가 없는 pdf (스캔 이미지일 수 있음)")
-    return {"format": "pdf", "pages": pages}
+    return {"format": "pdf", "pages": pages, "visual_pages": [p["n"] for p in pages if p["visual"]]}
 
 
 def read_text(path):
