@@ -7,7 +7,7 @@
   python proposal_cli.py setup-save --json '{"project_root": "~/Desktop/제안서"}'
   python proposal_cli.py init --client 고객사 --title 건명 [--due 2026-08-28]
   python proposal_cli.py status <프로젝트 폴더>
-  python proposal_cli.py read <파일> [--full]
+  python proposal_cli.py read <파일> [--full | --lines [--offset N]]
   python proposal_cli.py profile <예시.pptx>
   python proposal_cli.py outline-check <outline.md> [--requirements requirements.md]
   python proposal_cli.py render <outline.md> --out <결과.pptx> [--project <폴더>]
@@ -71,7 +71,7 @@ def cmd_doctor(a):
         "summary": "준비 완료" if not missing else f"필요한 라이브러리가 없습니다: {', '.join(missing)}",
         "python": sys.version.split()[0], "os": platform.system(), "missing": missing,
         "install": f"{Path(sys.executable).name} -m pip install --user {' '.join(missing)}" if missing else None,
-        "drm_reader": "PowerPoint (Windows)" if ppt else "없음 — DRM 파일은 읽을 수 없음",
+        "drm_reader": "PowerPoint·Word·Excel (Windows)" if ppt else "없음 — DRM 파일은 Windows 의 Office 로 읽습니다",
         "config": {"path": str(CONFIG_PATH).replace(str(Path.home()), "~"), "exists": CONFIG_PATH.exists()},
         "company_profile": (SHARED / "company" / "company.json").exists(),
         "next": "setup-scan" if not CONFIG_PATH.exists() else None,
@@ -161,16 +161,31 @@ def _lines(d):
 
 def cmd_read(a):
     from proposal_lib.deckio import read_any
-    d = read_any(expand(a.file))
+    d = read_any(expand(a.file), via=a.via)
     if d.get("error"):
-        return emit({"ok": False, "code": d["error"], "summary": d.get("message"), "drm": d.get("drm")})
+        return emit({"ok": False, "code": d["error"], "summary": d.get("message"), "drm": d.get("drm"),
+                     "looks_like": d.get("looks_like"), "tried": d.get("tried"), "hints": d.get("hints"),
+                     "next": "hints 를 보고 다른 방법(--via)을 시도하거나 사용자에게 붙여 달라고 한다"})
     if a.lines:
-        body = {"lines": _lines(d)}
+        # 한 번에 max_chars 글자까지만 낸다. 출력이 크면 에이전트 도구가 결과를 평문 파일로 저장하는데,
+        # DRM 문서 내용이 디스크에 남지 않도록 나눠 읽게 한다 (--offset 으로 이어 읽기).
+        all_lines = _lines(d)
+        start = max(0, a.offset)
+        page, used = [], 0
+        for ln in all_lines[start:]:
+            if page and used + len(ln) > a.max_chars:
+                break
+            page.append(ln)
+            used += len(ln) + 1
+        end = start + len(page)
+        body = {"lines": page, "total_lines": len(all_lines), "offset": start,
+                "next_offset": end if end < len(all_lines) else None}
     elif d["format"] == "pptx" and not a.full:
         body = {"slides": _brief_pptx(d), "size_cm": d["size_cm"], "masters": d.get("masters")}
     else:
         body = {k: v for k, v in d.items() if k not in ("path",)}
-    return emit({"ok": True, "code": "read", "summary": f"{d['format']} 읽음 (DRM {'예' if d.get('drm') else '아니오'})", "drm": d.get("drm"), **body})
+    return emit({"ok": True, "code": "read", "summary": f"{d['format']} 읽음 (DRM {'예' if d.get('drm') else '아니오'}, {d.get('via')} 로 읽음)",
+                 "drm": d.get("drm"), "via": d.get("via"), "tried": d.get("tried"), **body})
 
 
 def cmd_profile(a):
@@ -369,7 +384,9 @@ def main():
     p = sp.add_parser("setup-save"); p.add_argument("--json", required=True); p.add_argument("--create-root", action="store_true"); p.set_defaults(fn=cmd_setup_save)
     p = sp.add_parser("init"); p.add_argument("--client", required=True); p.add_argument("--title", required=True); p.add_argument("--due"); p.add_argument("--root"); p.set_defaults(fn=cmd_init)
     p = sp.add_parser("status"); p.add_argument("project"); p.set_defaults(fn=cmd_status)
-    p = sp.add_parser("read"); p.add_argument("file"); p.add_argument("--full", action="store_true"); p.add_argument("--lines", action="store_true"); p.set_defaults(fn=cmd_read)
+    p = sp.add_parser("read"); p.add_argument("file"); p.add_argument("--full", action="store_true"); p.add_argument("--lines", action="store_true")
+    p.add_argument("--via", help="읽는 방법 지정: pptx docx xlsx pdf hwpx text word excel powerpoint hangul")
+    p.add_argument("--offset", type=int, default=0); p.add_argument("--max-chars", type=int, default=15000); p.set_defaults(fn=cmd_read)
     p = sp.add_parser("profile"); p.add_argument("file"); p.set_defaults(fn=cmd_profile)
     p = sp.add_parser("outline-check"); p.add_argument("outline"); p.add_argument("--requirements"); p.set_defaults(fn=cmd_outline_check)
     p = sp.add_parser("snapshot"); p.add_argument("file"); p.add_argument("--out"); p.add_argument("--slides"); p.set_defaults(fn=cmd_snapshot)

@@ -31,7 +31,26 @@ RFP(제안요청서)를 뼈대로 제안서를 **설계 → 제작 → 점검**�
 | `.pptx` `.docx` `.xlsx` (`.pdf` 일부) | 저장·복사·이동 즉시 암호화 (파일 앞부분이 `BMS` 등으로 바뀜) | 결과 pptx 가 암호화되는 것은 정상. 다시 읽을 때는 PowerPoint 경유 |
 | `.md` `.json` `.csv` `.png` 등 텍스트·이미지 | 평문 유지 | 작업 상태(요건 · 구성안 · 점검 결과)는 전부 md/json 으로 둔다 |
 | DRM pptx 읽기 | python 라이브러리로는 불가 | `read` · `profile` · `review` 가 자동으로 PowerPoint 를 읽기 전용으로 열어 메모리에서만 구조를 뽑는다 (Windows) |
-| DRM docx · xlsx · pdf 읽기 | 아직 미지원 | 읽지 않고, 필요한 부분을 대화로 붙여 주거나 승인된 평문본을 지정해 달라고 안내한다 |
+| DRM docx · xlsx · doc · xls 읽기 | 그 문서를 여는 앱(Word·Excel)은 읽을 수 있다 | `read` 가 앱을 읽기 전용·숨김으로 열어 메모리에서만 읽고 저장 없이 닫는다 (Windows) |
+
+### 파일은 "못 읽는다"고 하지 않고 읽는다
+
+어떤 파일이든 먼저 `read <파일> --lines` 를 실행한다. `read` 는 확장자만 보지 않고 **파일 앞부분(DRM·PDF·zip 안 이름·옛 Office)** 과 **이 PC 에 설치된 앱**으로 읽는 방법을 정해 차례로 시도하고, 하나가 실패하면 다음 방법으로 넘어간다. 결과의 `via` 가 실제로 읽은 방법이고 `tried` 가 실패한 시도다.
+
+| 형식 | 평문일 때 | DRM·옛 형식일 때 |
+|---|---|---|
+| pptx · docx · xlsx · pdf · hwpx · txt · csv | python 으로 바로 (빠르고 토큰이 적다) | PowerPoint · Word · Excel 로 읽기 전용 |
+| doc · xls · ppt (옛 Office) | — | Word · Excel · PowerPoint |
+| hwp | — | 한컴오피스(한글)가 설치된 PC 만 |
+| DRM pdf | — | Word 로 시도 (변환 안내창에 걸리면 시간 초과) |
+| 확장자 없음·모르는 확장자 | 글자 파일이면 text | 앱을 차례로 시도 |
+
+실패해도 멈추지 않는다. 실패하면 `code`=`unreadable` 과 함께 **`tried`(무엇을 시도했나)·`hints`(다음에 해 볼 일)** 가 온다. 그것을 보고 에이전트가 스스로 이어간다.
+
+1. `--via word|excel|powerpoint|hangul|pdf|docx|xlsx|hwpx|text` 로 읽는 방법을 직접 지정해 다시 시도한다 (확장자가 틀린 파일도 이렇게 푼다).
+2. 긴 문서는 `--lines` 가 한 번에 약 15000자까지만 내고 `next_offset` 을 준다. `--offset <next_offset>` 으로 이어 읽는다 (도구가 큰 결과를 평문 파일로 저장해 DRM 문서가 디스크에 남는 것을 막는다).
+3. 스캔 이미지 PDF·한글이 없는 PC 의 hwp 처럼 정말 안 열리면, 그때만 사용자에게 붙여 달라고 하거나 PDF·DOCX 로 저장해 달라고 부탁한다. 처음부터 "못 읽는다"고 말하지 않는다.
+4. 새 형식이 필요하면 `scripts/proposal_lib/deckio.py` 의 `READERS` 에 함수 하나, `guess_routes()` 에 한 줄을 더한다.
 
 - 복호화된 사본을 디스크에 만들지 않는다. 시스템 임시 폴더로 옮겨 암호화를 피하는 방법도 쓰지 않는다 (사내 보안 정책 위반이며, 임시 폴더는 자동 청소된다).
 - DRM 덱의 `snapshot` 이미지는 시스템 임시 폴더에만 만들고 검토가 끝나면 지운다.
