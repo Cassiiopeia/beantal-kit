@@ -390,6 +390,8 @@ def _hints(p, look, tried):
     h = []
     if look == "drm":
         h.append("DRM 파일입니다. 이 파일을 여는 프로그램이 이 PC 에 있으면 `read --via <word|excel|powerpoint|hangul>` 로 그 프로그램을 지정해 다시 시도하세요.")
+    if look == "zip":
+        h.append("zip 묶음입니다. 풀지 말고 `archive <파일>` 로 안에 든 파일 목록과 엑셀 시트의 열 이름·행 수를 메모리에서 확인하세요. 집계는 임시 스크립트로 직접 하되 SKILL.md 의 '자료 집계' 규칙을 따릅니다.")
     if p.suffix.lower() in HWP_EXT:
         h.append("한글(HWP)은 한컴오피스가 설치된 PC 에서만 읽힙니다. 없으면 사용자에게 한글에서 열어 필요한 부분을 복사해 붙여 달라고 하거나 PDF·DOCX 로 저장해 달라고 하세요.")
     if p.suffix.lower() == ".pdf" or look == "pdf":
