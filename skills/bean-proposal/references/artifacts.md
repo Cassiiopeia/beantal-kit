@@ -18,7 +18,6 @@
 
 - **텍스트 산출물(md/json)이 진실이고 pptx 는 결과물이다.** 수정은 outline.md 에서 하고 다시 만든다.
 - 사내 DRM 이 있으면 pptx 는 저장 즉시 암호화된다. 정상이다. 이 skill 은 DRM pptx 를 PowerPoint 로 읽는다.
-- 고객 담당자 이름 · 연락처 · 이메일 같은 개인정보는 어떤 산출물에도 옮기지 않는다.
 
 ## 2. requirements.md
 
