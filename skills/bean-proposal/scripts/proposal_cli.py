@@ -281,7 +281,7 @@ def cmd_archive(a):
         items = archive.peek(src, member=a.member, rows=a.rows)
     except Exception as e:
         return emit({"ok": False, "code": "archive_failed", "summary": f"{type(e).__name__}: {str(e)[:200]}"})
-    return emit({"ok": True, "code": "archive", "summary": f"파일 {len(items)}개 (압축은 풀지 않음, 개인정보 열은 값을 가림)", "items": items,
+    return emit({"ok": True, "code": "archive", "summary": f"파일 {len(items)}개 (압축은 풀지 않음)", "items": items,
                  "next": "시트·열 구조를 보고 집계 방법을 정한 뒤, 임시 스크립트는 시스템 임시 폴더에만 만들고 끝나면 지운다. 결과는 01_분석/data-summary.md 에 출처와 함께 적는다"})
 
 
