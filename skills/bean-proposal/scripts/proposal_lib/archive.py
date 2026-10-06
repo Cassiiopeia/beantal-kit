@@ -1,16 +1,12 @@
 """zip 안 자료를 디스크에 풀지 않고 메모리에서 훑어본다.
 
 집계 방식은 자료마다 다르므로 여기서는 "무엇이 들어 있나"만 알려 준다 (파일 목록, 시트·행 수·열 이름, 앞부분 몇 줄).
-개인정보로 보이는 열은 값을 가리고 이름만 알려 준다. 집계는 에이전트가 그때그때 임시 스크립트로 한다.
+값은 가리지 않고 그대로 보여 준다. 집계는 에이전트가 그때그때 임시 스크립트로 한다.
 """
 import csv
 import io
 import re
 import zipfile
-
-# 열 이름에 이런 말이 들어 있으면 값을 읽지 않는다 (수하인·연락처·주소 등)
-PII = re.compile(r"(수하인|수취인|받는\s*분|수령인|이름|성명|연락|전화|휴대|핸드폰|tel|phone|mobile|주소|addr|이메일|e-?mail|주민|계좌)", re.I)
-
 
 def _name(info):
     """한글 파일명이 깨진 zip(cp437 로 저장된 것)을 복원한다."""
@@ -56,12 +52,7 @@ def _sheet_summary(ws, rows):
             total += 1
             if len(sample) < rows:
                 sample.append([_cell(c) for c in r])
-    pii = [i for i, h in enumerate(header) if PII.search(h)]
-    for row in sample:
-        for i in pii:
-            if i < len(row):
-                row[i] = "(가림)"
-    return {"rows": total, "columns": header, "pii_columns": [header[i] for i in pii], "sample": sample}
+    return {"rows": total, "columns": header, "sample": sample}
 
 
 def _xlsx_info(data, rows):
@@ -81,13 +72,8 @@ def _csv_info(data, rows):
         return {"error": "인코딩을 알 수 없는 csv"}
     r = list(csv.reader(io.StringIO(text)))
     header = r[0] if r else []
-    pii = [i for i, h in enumerate(header) if PII.search(h)]
     sample = [list(x) for x in r[1:1 + rows]]
-    for row in sample:
-        for i in pii:
-            if i < len(row):
-                row[i] = "(가림)"
-    return {"rows": len(r), "columns": header, "pii_columns": [header[i] for i in pii], "sample": sample}
+    return {"rows": len(r), "columns": header, "sample": sample}
 
 
 def peek(path, member=None, rows=0):
@@ -142,8 +128,6 @@ def pivot(path, member, sheet, group, sums, bucket="none"):
     for c in [group] + sums:
         if c not in header:
             return {"error": f"열이 없습니다: {c}. 있는 열: {header}"}
-        if PII.search(c):
-            return {"error": f"개인정보로 보이는 열은 집계하지 않습니다: {c}"}
     gi, si = header.index(group), [header.index(c) for c in sums]
     acc, skipped = {}, 0
     for r in it:
