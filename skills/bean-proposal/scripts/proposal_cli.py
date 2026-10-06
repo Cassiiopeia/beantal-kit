@@ -24,6 +24,7 @@ import os
 import platform
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -186,6 +187,26 @@ def cmd_read(a):
         body = {k: v for k, v in d.items() if k not in ("path",)}
     return emit({"ok": True, "code": "read", "summary": f"{d['format']} 읽음 (DRM {'예' if d.get('drm') else '아니오'}, {d.get('via')} 로 읽음)",
                  "drm": d.get("drm"), "via": d.get("via"), "tried": d.get("tried"), **body})
+
+
+def cmd_probe(a):
+    """판단은 에이전트가 한다. 파일이 어떻게 생겼는지, 이 PC 에 무엇이 있는지, 읽는 방법 후보만 알려 준다."""
+    from proposal_lib import deckio
+    p = expand(a.file)
+    if not p.exists():
+        return emit({"ok": False, "code": "missing", "summary": f"파일이 없습니다: {p}"})
+    look = deckio.sniff(p)
+    apps = {}
+    if platform.system() == "Windows":
+        for name, progid in (("word", "Word.Application"), ("excel", "Excel.Application"), ("powerpoint", "PowerPoint.Application"), ("hangul", "HWPFrame.HwpObject")):
+            cmd = f"[bool][type]::GetTypeFromProgID('{progid}')"
+            r = subprocess.run(["powershell", "-NoProfile", "-Command", cmd], capture_output=True)
+            apps[name] = r.stdout.decode(errors="ignore").strip().lower() == "true"
+    return emit({"ok": True, "code": "probed", "summary": f"{p.name}: 생김새={look}, 확장자={p.suffix or '없음'}",
+                 "looks_like": look, "ext": p.suffix.lower(), "mb": round(p.stat().st_size / 1e6, 2),
+                 "installed_apps": apps, "route_candidates": deckio.guess_routes(p.suffix.lower(), look),
+                 "via_options": list(deckio.READERS),
+                 "next": "route_candidates 를 참고해 `read <파일> --lines --via <방법>` 으로 직접 고른다. 확장자와 생김새가 다르면 생김새를 믿는다"})
 
 
 def cmd_profile(a):
@@ -384,6 +405,7 @@ def main():
     p = sp.add_parser("setup-save"); p.add_argument("--json", required=True); p.add_argument("--create-root", action="store_true"); p.set_defaults(fn=cmd_setup_save)
     p = sp.add_parser("init"); p.add_argument("--client", required=True); p.add_argument("--title", required=True); p.add_argument("--due"); p.add_argument("--root"); p.set_defaults(fn=cmd_init)
     p = sp.add_parser("status"); p.add_argument("project"); p.set_defaults(fn=cmd_status)
+    p = sp.add_parser("probe"); p.add_argument("file"); p.set_defaults(fn=cmd_probe)
     p = sp.add_parser("read"); p.add_argument("file"); p.add_argument("--full", action="store_true"); p.add_argument("--lines", action="store_true")
     p.add_argument("--via", help="읽는 방법 지정: pptx docx xlsx pdf hwpx text word excel powerpoint hangul")
     p.add_argument("--offset", type=int, default=0); p.add_argument("--max-chars", type=int, default=15000); p.set_defaults(fn=cmd_read)
