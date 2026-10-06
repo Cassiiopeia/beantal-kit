@@ -152,6 +152,6 @@ npm run check               # frontmatter, name, 접두사 검증
 ---
 
 <!-- AUTO-VERSION-SECTION: DO NOT EDIT MANUALLY -->
-## 최신 버전 : v0.5.0 (2026-10-06)
+## 최신 버전 : v0.6.0 (2026-10-06)
 
 [전체 버전 기록 보기](CHANGELOG.md)
