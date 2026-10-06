@@ -1,6 +1,6 @@
 {
   "name": "beantal-kit",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "빈털 전용 Claude Code·Codex skill 키트 — npx beantal-kit 으로 마켓플레이스 등록",
   "keywords": [
     "claude-code",
