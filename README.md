@@ -32,7 +32,6 @@ codex plugin marketplace add Cassiiopeia/beantal-kit
 |---|---|---|
 | `bean-proposal` | 제안서 PPT 컨설턴트: RFP 분석, 구성 조언, PPT 초안 제작, 제출 전 점검·비판 | "RFP 왔어", "제안서 만들어줘", "목차 잡아줘", "이 제안서 검토해줘", "제출 전에 점검해줘" |
 | `bean-issue-first` | 작업을 GitHub 이슈로 시작하고 완료 증거를 댓글로 남긴다 | "이슈 먼저", "이슈화해서 진행", "이슈 완료 처리" |
-| `bean-hello` | 설치 확인용 | "bean-hello" |
 
 자연어로 말하면 Claude 가 skill 설명을 보고 알아서 고른다. 확실하게 부르고 싶으면 슬래시 명령을 쓴다: `/beantal-kit:bean-proposal 이 RFP로 제안서 구성 잡아줘`
 
