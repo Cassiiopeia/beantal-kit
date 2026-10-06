@@ -18,7 +18,7 @@ RFP(제안요청서)를 뼈대로 제안서를 **설계 → 제작 → 점검**�
 2. **회사 수치는 회사 프로필 한 곳에서만** (`~/.beantal-kit/shared/company/company.json`). `status` 가 `conflict` 인 값은 쓰지 말고 사용자에게 확정을 받는다. 같은 덱에 다른 수치가 섞이는 사고를 막는다.
 3. **DRM(사내 문서 보안)을 우회하지 않는다.** 복호화 사본을 만들지 않고, DRM 파일은 PowerPoint 를 통해 메모리에서만 읽는다. 저장한 pptx 가 암호화되는 것은 정상이다.
 4. **개인정보를 옮기지 않는다.** RFP 의 고객 담당자 이름·연락처·이메일은 어떤 산출물에도 적지 않는다.
-5. **텍스트가 원본이다.** 덱 수정은 `02_설계/outline.md` 에서 하고 다시 만든다. pptx 를 직접 고친 경우 다음 제작 전에 사용자에게 반영 여부를 묻는다.
+5. **버전 파일은 만든 뒤 고치지 않는다.** v01 은 `outline.md` 에서 `render` 로 만들고, v02 부터는 **최신 pptx 가 기준**이다. 고칠 때는 `version-new` 로 최신본을 다음 번호로 복사한 뒤 그 복사본만 고친다. 사람이 PowerPoint 에서 직접 고친 파일이 이미 있으면 그것이 기준이니 `outline.md` 로 덮어 다시 만들지 않는다. PowerPoint 가 파일을 잠가도 새 번호로 만들면 충돌이 없다.
 6. **승인 게이트를 지킨다.** G1 요건 목록, G2 방향·구성안, G3 초안, G4 점검, G5 제출 — 사용자 승인 전에는 다음 단계로 가지 않는다. 방향이 틀린 채 버전만 쌓이는 것을 막는다.
 7. **한 번에 한 질문.** 선택지가 있으면 추천안을 첫 번째에 두고 이유를 붙인다.
 
@@ -83,13 +83,36 @@ PYTHON=$(command -v python3 || command -v python)
 | S3 질의 | 모호한 요건 → 고객 질의서 초안 | — | questions.md |
 | S4 분배 | (대형 RFP) 요건을 부서별 확인 요청으로 나누고 회신 반영 | — | 03_부서회신/*.md |
 | S5 설계 | 제안 방향 3대 축 → 목차(=RFP 작성 요청 순서) → 장별 유형·제목·메시지·근거 | `outline-renumber`, `outline-check <outline> --requirements <req>` | strategy.md, outline.md · **G2** |
-| S6 제작 | outline 대로 pptx | `render <outline> --out 04_제작/<건명>_vNN.pptx --project <폴더> --change "…" [--client-mark 고객사]` | vNN.pptx · **G3** |
+| S6 제작 | v01 은 outline 대로 pptx, v02~ 는 최신본 복사 후 수정 | `render <outline> --out 04_제작/<건명>_vNN.pptx --project <폴더> --change "…" [--client-mark 고객사]` | vNN.pptx · **G3** |
 | S7 점검 | 자동 점검 + 화면 확인 + 6축 채점 | `review <덱> [--requirements …] [--client …] --md 05_점검/review_vNN.md`, `snapshot <덱> [--slides 1,4,9]` | review_vNN.md · **G4** (🟥 0건) |
 | S8 제출 | 제출 서류 체크리스트, 최종본 확정 | `status <폴더>` | checklist.md · **G5** |
 
+- v02 이후 수정: `version-new <프로젝트> --change "5장 SLA 수치 수정"` 로 복사한 뒤 `edit <새 vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'` 로 글자를 바꾼다 (slide 0 = 전체 장). DRM 덱도 PowerPoint 경유로 고친다. 최신 버전이 아닌 파일은 `edit` 이 거절한다. 장 추가·삭제·배치 변경처럼 글자 교체로 안 되는 수정은 사용자와 함께 PowerPoint 에서 하고 다음 번호로 저장하게 한다.
+- 변경 이력은 `project.json` 의 `versions` 에 쌓인다 (버전, 날짜, 기준 파일, 바꾼 이유). 새 대화에서 이어 작업할 때는 `status <프로젝트>` 와 이 이력을 먼저 읽는다.
 - `outline-check` 의 커버리지 오류(O12)는 빠진 요건이다. 장을 추가하거나 기존 장 근거에 연결한 뒤 다시 확인한다.
 - `snapshot` 이미지를 Read 로 보고 빈 공간 · 넘침 · 줄바꿈을 확인한다. DRM 덱의 이미지는 시스템 임시 폴더에만 만들고 검토 후 지운다.
 - 새 버전 번호는 `status` 의 `next_version` 을 쓴다. 파일명에 `_수정`, `_1_1` 같은 꼬리를 붙이지 않는다.
+
+## 레퍼런스 등록 (대화 중 묻기)
+
+사용자가 대화 중에 **과거·완성된 제안서나 예시 PPT, 또는 RFP 와 짝이 되는 자료**를 주면, 작업을 계속하기 전에 한 번 묻는다. 이미 `references.json` 에 있는 파일, 지금 만드는 프로젝트의 중간 산출물(초안 vNN), 사용자가 "참고만 할게"라고 한 파일은 묻지 않는다.
+
+AskUserQuestion 으로 묻는다 (추천을 첫 번째에):
+
+- 질문: "이 파일을 레퍼런스로 등록할까요? (다음 제안서에서 구성·스타일 참고용으로 씁니다)"
+- 선택지: **등록(추천)** — 복사해서 보관하고 평문 요약(digest.md)을 만든다 / **등록안함** — 이번 대화에서만 쓰고 보관하지 않는다
+
+"등록"이면 필요한 칸(고객사, 건명, 연도, 품질 gold·reference·wip)을 대화에서 알 수 있는 만큼 채우고, 모르는 것만 한 번에 한 질문으로 묻는다. 그다음:
+
+```bash
+"$PYTHON" "$CLI" ref-add --client 고객사 --title 건명 --year 2026 --quality reference --file 최종=<pptx 경로> [--file 입력(RFP)=<docx 경로>]
+"$PYTHON" "$CLI" ref-digest <id>
+```
+
+- 역할(role)은 `최종` `초안` `입력(RFP)` `질의` `틀` `부서양식` `작업중` 중 하나다. `최종`·`틀`·`작업중` 의 pptx 만 digest 대상이다.
+- 원본은 옮기거나 지우지 않고 **복사**만 한다. 고객사 자료라 레포와 skill 폴더에는 절대 넣지 않는다.
+- 보관 위치는 `~/.beantal-kit/configs/bean-proposal/references/<id>/` (`원본/` 과 `digest.md`). 설계·스타일 참고가 필요하면 pptx 를 열기 전에 `digest.md` 를 먼저 읽는다 (토큰 절약, DRM 영향 없음).
+- 등록 후 `status` 가 `conflict` 인 회사 수치가 이 자료에서 드러나면 사용자에게 알린다.
 
 ## 비판 모드
 
@@ -116,7 +139,7 @@ PYTHON=$(command -v python3 || command -v python)
 ## 설정 (config)
 
 - 설정 파일 위치는 고정이다: `~/.beantal-kit/configs/bean-proposal/config.json` (Windows: `%USERPROFILE%\.beantal-kit\configs\bean-proposal\config.json`). 탐색하지 말고 이 경로를 바로 읽는다.
-- 같은 폴더에 `references.json`(참고 제안서 목록), `library.json`(재사용 장표 색인), `evals/`(테스트 기록)를 둔다. 회사 공통 정보는 `~/.beantal-kit/shared/company/`.
+- 같은 폴더에 `references.json`(참고 제안서 목록)과 `references/`(복사본 + digest.md), `library.json`(재사용 장표 색인), `evals/`(테스트 기록)를 둔다. 회사 공통 정보는 `~/.beantal-kit/shared/company/`.
 - 템플릿은 이 skill 폴더의 `config.json.example` 이다. 각 칸의 의미는 `_comment_*` 에 적혀 있다.
 - **플러그인 폴더(캐시) 안에는 설정을 절대 쓰지 않는다.** 플러그인을 업데이트하면 폴더가 바뀌어 설정이 사라진 것처럼 보인다.
 - 설정이 없으면 위 "작업 루트 설정" 절차로 **한 번에 한 질문**씩 물어 만든다. 사용자가 파일을 직접 편집하게 하지 않는다.

@@ -11,6 +11,11 @@
   python proposal_cli.py profile <예시.pptx>
   python proposal_cli.py outline-check <outline.md> [--requirements requirements.md]
   python proposal_cli.py render <outline.md> --out <결과.pptx> [--project <폴더>]
+  python proposal_cli.py ref-add --client 고객사 --title 건명 --year 2026 --file 최종=<pptx>
+  python proposal_cli.py ref-migrate
+  python proposal_cli.py ref-digest [<id> ...]
+  python proposal_cli.py version-new <프로젝트 폴더> --change "수정 이유"
+  python proposal_cli.py edit <vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'
   python proposal_cli.py review <덱.pptx> [--requirements r.md] [--client 고객사] [--md 결과.md]
 """
 import argparse
@@ -274,6 +279,87 @@ def cmd_review(a):
     return emit(r)
 
 
+def cmd_version_new(a):
+    from proposal_lib.project import new_version
+    r = new_version(expand(a.project), a.change, a.base)
+    if r["ok"]:
+        r["next"] = "edit \"%s\" --json '[{\"slide\": 5, \"find\": \"…\", \"replace\": \"…\"}]' 로 이 복사본만 고친다" % r["path"]
+    return emit(r)
+
+
+def cmd_edit(a):
+    """복사본의 글자를 바꾼다. 이전 버전 파일에는 쓰지 않는다 (vNN 이 최신이 아니면 거절)."""
+    import subprocess, tempfile
+    from proposal_lib.project import latest_deck
+    f = expand(a.file)
+    edits = json.loads(a.json)
+    last = latest_deck(f.parent.parent) if f.parent.name == "04_제작" else None
+    if last and last.resolve() != f.resolve():
+        return emit({"ok": False, "code": "not_latest", "summary": f"최신 버전이 아닙니다 ({last.name}). version-new 로 새 버전을 만든 뒤 고치세요."})
+    if platform.system() == "Windows":
+        ps1 = Path(__file__).resolve().parent / "edit_pptx.ps1"
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as t:
+            json.dump(edits, t, ensure_ascii=False)
+        try:
+            r = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-Path", str(f), "-EditsJson", t.name],
+                               capture_output=True, text=True, encoding="utf-8")
+        finally:
+            os.unlink(t.name)
+        try:
+            out = json.loads(r.stdout.strip().splitlines()[-1])
+        except Exception:
+            return emit({"ok": False, "code": "edit_failed", "summary": (r.stderr or r.stdout)[:400]})
+        return emit({"ok": True, "code": "edited", "summary": f"{f.name}: " + ", ".join(f"{x['find'][:12]}→{x['replaced']}곳" for x in out["results"]), **out,
+                     "next": f"snapshot \"{f}\" --slides … 로 화면 확인, review 로 점검"})
+    from pptx import Presentation
+    prs = Presentation(str(f))
+    res = []
+    for e in edits:
+        n = 0
+        for i, s in enumerate(prs.slides, 1):
+            if e["slide"] not in (0, i):
+                continue
+            for sh in s.shapes:
+                if sh.has_text_frame:
+                    for para in sh.text_frame.paragraphs:
+                        for run in para.runs:
+                            if e["find"] in run.text:
+                                run.text = run.text.replace(e["find"], e["replace"]); n += 1
+        res.append({"slide": e["slide"], "find": e["find"], "replaced": n})
+    prs.save(str(f))
+    return emit({"ok": True, "code": "edited", "summary": f"{f.name} 수정", "results": res})
+
+
+def cmd_ref_add(a):
+    from proposal_lib import refs
+    files = []
+    for spec in a.file:
+        role, _, path = spec.partition("=")
+        if not path:
+            return emit({"ok": False, "code": "bad_file_spec", "summary": f"--file 은 역할=경로 형식입니다: {spec}"})
+        files.append((role, path))
+    pid = a.id or refs.slug(f"{a.client}-{a.year or ''}")
+    proj, log = refs.add(pid, a.client, a.title, a.year, a.quality, files, a.note)
+    ok = all(x["ok"] for x in log)
+    return emit({"ok": ok, "code": "ref_added", "summary": f"{pid}: {sum(x['ok'] for x in log)}/{len(log)}개 등록", "id": pid, "files": log,
+                 "next": f"ref-digest {pid} 로 평문 요약(digest.md)을 만든다"})
+
+
+def cmd_ref_migrate(a):
+    from proposal_lib import refs
+    log = refs.migrate()
+    return emit({"ok": all(x["ok"] for x in log), "code": "ref_migrated", "summary": f"{sum(x['ok'] for x in log)}/{len(log)}개 복사", "files": log})
+
+
+def cmd_ref_digest(a):
+    from proposal_lib import refs
+    from proposal_lib.deckio import read_pptx
+    from proposal_lib.profile import profile
+    ids = a.id or [p["id"] for p in refs.load()["projects"]]
+    res = [refs.digest(i, _brief_pptx, profile, read_pptx) for i in ids]
+    return emit({"ok": all(r["ok"] for r in res), "code": "ref_digest", "summary": f"{len(res)}건 처리", "results": res})
+
+
 def main():
     ap = argparse.ArgumentParser(prog="proposal_cli")
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -289,6 +375,11 @@ def main():
     p = sp.add_parser("snapshot"); p.add_argument("file"); p.add_argument("--out"); p.add_argument("--slides"); p.set_defaults(fn=cmd_snapshot)
     p = sp.add_parser("outline-renumber"); p.add_argument("outline"); p.set_defaults(fn=cmd_outline_renumber)
     p = sp.add_parser("render"); p.add_argument("outline"); p.add_argument("--out", required=True); p.add_argument("--project"); p.add_argument("--change"); p.add_argument("--client-mark"); p.set_defaults(fn=cmd_render)
+    p = sp.add_parser("ref-add"); p.add_argument("--client", required=True); p.add_argument("--title", required=True); p.add_argument("--year"); p.add_argument("--id"); p.add_argument("--quality", default="reference", choices=["gold", "reference", "wip"]); p.add_argument("--file", action="append", required=True, help="역할=경로 (여러 번)"); p.add_argument("--note"); p.set_defaults(fn=cmd_ref_add)
+    sp.add_parser("ref-migrate").set_defaults(fn=cmd_ref_migrate)
+    p = sp.add_parser("ref-digest"); p.add_argument("id", nargs="*"); p.set_defaults(fn=cmd_ref_digest)
+    p = sp.add_parser("version-new"); p.add_argument("project"); p.add_argument("--change", required=True); p.add_argument("--base"); p.set_defaults(fn=cmd_version_new)
+    p = sp.add_parser("edit"); p.add_argument("file"); p.add_argument("--json", required=True, help='[{"slide":5,"find":"…","replace":"…"}]'); p.set_defaults(fn=cmd_edit)
     p = sp.add_parser("review"); p.add_argument("file"); p.add_argument("--requirements"); p.add_argument("--client"); p.add_argument("--md"); p.set_defaults(fn=cmd_review)
     a = ap.parse_args()
     missing = need_libs() if a.cmd != "doctor" else []

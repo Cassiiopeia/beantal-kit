@@ -102,3 +102,25 @@ def record_version(pdir, file, change):
     v = re.search(r"_(v\d+)\.pptx$", str(file))
     p["versions"].append({"v": v.group(1) if v else None, "date": dt.date.today().isoformat(), "file": str(file), "change": change})
     pj.write_text(json.dumps(p, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def latest_deck(pdir):
+    decks = sorted((Path(pdir).expanduser() / "04_제작").glob("*_v[0-9]*.pptx"), key=lambda p: int(re.search(r"_v(\d+)\.pptx$", p.name).group(1)))
+    return decks[-1] if decks else None
+
+
+def new_version(pdir, change, base=None):
+    """최신(또는 지정) 버전을 다음 vNN 으로 복사한다. 이전 버전은 건드리지 않는다. 고치는 일은 복사본에만 한다."""
+    import shutil
+    pdir = Path(pdir).expanduser()
+    src = (pdir / "04_제작" / base) if base else latest_deck(pdir)
+    if not src or not Path(src).exists():
+        return {"ok": False, "code": "no_base", "summary": "복사할 기존 버전이 없습니다. 첫 버전은 render 로 만듭니다."}
+    m = re.search(r"^(.*)_v(\d+)\.pptx$", src.name)
+    if not m:
+        return {"ok": False, "code": "bad_name", "summary": f"파일명이 <건명>_vNN.pptx 형식이 아닙니다: {src.name}"}
+    nxt = int(re.search(r"_v(\d+)\.pptx$", latest_deck(pdir).name).group(1)) + 1
+    dest = src.with_name(f"{m.group(1)}_v{nxt:02d}.pptx")
+    shutil.copy2(src, dest)
+    record_version(pdir, dest.relative_to(pdir), f"{change} (기준: {src.name})")
+    return {"ok": True, "code": "version_created", "summary": f"{src.name} → {dest.name}", "path": str(dest), "base": str(src)}
