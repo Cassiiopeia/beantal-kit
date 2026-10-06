@@ -8,6 +8,8 @@
   python proposal_cli.py init --client 고객사 --title 건명 [--due 2026-08-28]
   python proposal_cli.py status <프로젝트 폴더>
   python proposal_cli.py read <파일> [--full | --lines [--offset N]]
+  python proposal_cli.py archive <묶음.zip> [--member 이름] [--rows N] [--sheet 시트 --group 열 [--sum 열,열] [--bucket month]]
+  python proposal_cli.py pdf-view <파일.pdf> --pages 7,10
   python proposal_cli.py profile <예시.pptx>
   python proposal_cli.py outline-check <outline.md> [--requirements requirements.md]
   python proposal_cli.py render <outline.md> --out <결과.pptx> [--project <폴더>]
@@ -261,6 +263,28 @@ def cmd_snapshot(a):
                  "next": "Read 로 이미지를 보고 레이아웃을 검토" + (" — 검토 후 이 폴더를 지운다 (DRM 덱)" if drm else "")})
 
 
+def cmd_archive(a):
+    """zip 을 풀지 않고 안을 훑어본다. 집계는 자료마다 달라 에이전트가 임시 스크립트로 한다."""
+    from proposal_lib import archive
+    src = expand(a.file)
+    if not src.exists():
+        return emit({"ok": False, "code": "missing", "summary": f"파일이 없습니다: {src}"})
+    if a.group:
+        if not (a.member and a.sheet):
+            return emit({"ok": False, "code": "need_member_sheet", "summary": "--group 에는 --member 와 --sheet 가 필요합니다"})
+        res = archive.pivot(src, a.member, a.sheet, a.group, [x for x in (a.sum or "").split(",") if x], a.bucket)
+        if res.get("error"):
+            return emit({"ok": False, "code": "pivot_failed", "summary": res["error"]})
+        return emit({"ok": True, "code": "pivot", "summary": f"{res['group']} 별 {len(res['rows'])}줄", **res,
+                     "next": "이 표는 data-summary.md 에 member·시트·열 이름과 함께 옮긴다. 이 명령으로 안 되는 집계만 스크립트로 한다"})
+    try:
+        items = archive.peek(src, member=a.member, rows=a.rows)
+    except Exception as e:
+        return emit({"ok": False, "code": "archive_failed", "summary": f"{type(e).__name__}: {str(e)[:200]}"})
+    return emit({"ok": True, "code": "archive", "summary": f"파일 {len(items)}개 (압축은 풀지 않음, 개인정보 열은 값을 가림)", "items": items,
+                 "next": "시트·열 구조를 보고 집계 방법을 정한 뒤, 임시 스크립트는 시스템 임시 폴더에만 만들고 끝나면 지운다. 결과는 01_분석/data-summary.md 에 출처와 함께 적는다"})
+
+
 def cmd_pdf_view(a):
     """PDF 의 지정한 쪽을 이미지로 만든다. 그림·표·흐름도는 글자로 안 읽히므로 Read 로 직접 본다. 시스템 임시 폴더에만 만든다."""
     import tempfile
@@ -440,6 +464,8 @@ def main():
     p.add_argument("--offset", type=int, default=0); p.add_argument("--max-chars", type=int, default=15000); p.set_defaults(fn=cmd_read)
     p = sp.add_parser("profile"); p.add_argument("file"); p.set_defaults(fn=cmd_profile)
     p = sp.add_parser("outline-check"); p.add_argument("outline"); p.add_argument("--requirements"); p.set_defaults(fn=cmd_outline_check)
+    p = sp.add_parser("archive"); p.add_argument("file"); p.add_argument("--member"); p.add_argument("--rows", type=int, default=0)
+    p.add_argument("--sheet"); p.add_argument("--group"); p.add_argument("--sum"); p.add_argument("--bucket", choices=["none", "month", "year"], default="none"); p.set_defaults(fn=cmd_archive)
     p = sp.add_parser("pdf-view"); p.add_argument("file"); p.add_argument("--pages"); p.add_argument("--scale", type=float, default=1.6); p.set_defaults(fn=cmd_pdf_view)
     p = sp.add_parser("snapshot"); p.add_argument("file"); p.add_argument("--out"); p.add_argument("--slides"); p.set_defaults(fn=cmd_snapshot)
     p = sp.add_parser("outline-renumber"); p.add_argument("outline"); p.set_defaults(fn=cmd_outline_renumber)
