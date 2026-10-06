@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "빈털 전용 skill 마켓플레이스",
-    "version": "0.6.1"
+    "version": "0.7.0"
   },
   "plugins": [
     {
       "name": "beantal-kit",
       "source": "./",
       "description": "빈털 전용 업무 skill 모음 (bean-*)",
-      "version": "0.6.1",
+      "version": "0.7.0",
       "category": "Productivity",
       "keywords": [
         "skills",
