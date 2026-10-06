@@ -41,7 +41,8 @@ def emit(obj):
 
 
 def expand(p):
-    return Path(os.path.expanduser(str(p)))
+    # 절대 경로로 만든다. PowerPoint·Word 는 자기 작업 폴더 기준으로 상대 경로를 해석해 파일을 못 찾는다.
+    return Path(os.path.expanduser(str(p))).resolve()
 
 
 def need_libs():

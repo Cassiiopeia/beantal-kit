@@ -58,10 +58,10 @@ def _paras(slide):
         for p in sh.get("paras") or []:
             yield sh, p
         if sh.get("kind") == "table":
-            for row in sh.get("table") or []:
+            for ri, row in enumerate(sh.get("table") or []):
                 for c in row:
                     if c:
-                        yield sh, {"text": c, "size": None, "font": None, "color": None}
+                        yield sh, {"text": c, "size": None, "font": None, "color": None, "head": ri == 0}
 
 
 # ---------------------------------------------------------------- 헤더·목차 해석
@@ -132,7 +132,7 @@ def review(deck, config=None, company=None, known_clients=None, client=None, req
         n = s["n"]
         for sh, p in _paras(s):
             t = p["text"]
-            if MEMO_LABEL.match(t):
+            if MEMO_LABEL.match(t) and not p.get("head"):  # 표 머리글의 "확인" 같은 열 이름은 메모가 아니다
                 add("red", "Q02", n, f"작성자 라벨 '{t}' 이(가) 남아 있습니다", t)
             elif MEMO_STRONG.search(t) or COLLOQUIAL.search(t):
                 add("red", "Q02", n, "작성자 메모로 보이는 문장", t)

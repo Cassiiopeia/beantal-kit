@@ -228,6 +228,7 @@ def run_app_script(script_name, args, app, timeout=180):
     image = APP_PROC.get(app)
     before = _app_pids(image) if image else set()
     script = Path(__file__).resolve().parent.parent / script_name
+    args = [str(Path(a).resolve()) if i and args[i - 1] == "-Path" else a for i, a in enumerate(args)]  # 앱은 상대 경로를 못 찾는다
     cmd = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script), *args]
     try:
         out = subprocess.run(cmd, capture_output=True, timeout=timeout)
@@ -420,7 +421,7 @@ def _garbled(d):
 
 def read_any(path, via=None):
     """어떤 파일이든 읽어 공통 구조(dict)로 돌려준다. via 로 방법을 지정할 수 있다 (READERS 의 이름)."""
-    p = Path(os.path.expanduser(str(path)))
+    p = Path(os.path.expanduser(str(path))).resolve()
     if not p.exists():
         return {"error": "missing", "message": f"파일이 없습니다: {p}"}
     ext = p.suffix.lower()
