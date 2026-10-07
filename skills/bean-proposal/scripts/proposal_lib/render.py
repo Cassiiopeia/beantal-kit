@@ -45,12 +45,23 @@ class Style:
             hdr[k] = {**hdr.get(k, {}), **{kk: vv for kk, vv in v.items() if not kk.startswith("_")}} if isinstance(v, dict) else v
         self.header = hdr
         self.size = cfg.get("slide_size_cm") or [27.5, 19.05]
+        # design: 생략하면 기존 모양. card "band" = 둥근 띠 소제목 + 테두리 박스, divider "light" = 흰 간지,
+        # cover "panel" · toc "list", rule = 헤더 아래 가로줄 위치(cm), footer_logo = 하단 왼쪽 로고 이미지 경로
+        self.design = dict(cfg.get("design") or {})
+        self.client_logo = None
+        self.cover_image = None
+        self.footer_right = None
+
+    def band(self):
+        return self.design.get("card") == "band"
 
     def font(self, key):
         return self.fonts.get(key, key)
 
     def color(self, key):
         val = self.colors.get(key, key)
+        if isinstance(val, str) and val.startswith("#"):
+            val = val[1:]
         return RGBColor.from_string(val if HEX.fullmatch(val or "") else DEFAULT_COLORS["text"])
 
 
@@ -134,20 +145,77 @@ def header(slide, st, sec_num, sec_label, title, message, client_mark=None):
         put("number", f"{sec_num:02d}.")
     if title:
         put("title", title)
-    if client_mark:
+    if st.client_logo:
+        spec = h["client_mark"]
+        _picture(slide, st.client_logo, spec["left"], spec["top"], spec["width"], spec["height"])
+    elif client_mark:
         put("client_mark", client_mark)
+    rule = st.design.get("rule")
+    if rule:
+        rect(slide, st, 0, float(rule), st.size[0], 0.04, GRID)
     if message:
         spec = h["message"]
         text(slide, st, spec["left"], spec["top"], spec["width"], spec["height"], message, size=spec["size"],
              font=spec["font"], color=spec["color"], bold=spec.get("bold", True), fit=True)
-        y = spec["top"] + spec["height"] + 0.1
-        line = slide.shapes.add_connector(1, Cm(spec["left"]), Cm(y), Cm(spec["left"] + spec["width"]), Cm(y))
-        line.line.color.rgb = st.color("muted")
-        line.line.width = Pt(0.5)
+        if not rule:
+            y = spec["top"] + spec["height"] + 0.1
+            line = slide.shapes.add_connector(1, Cm(spec["left"]), Cm(y), Cm(spec["left"] + spec["width"]), Cm(y))
+            line.line.color.rgb = st.color("muted")
+            line.line.width = Pt(0.5)
+
+
+def _picture(slide, path, left, top, width, height, align="right"):
+    """비율을 지키며 상자 안에 맞춘다 (기본 오른쪽 정렬). 파일이 없으면 건너뛴다."""
+    from pathlib import Path
+    p = Path(str(path)).expanduser()
+    if not p.exists():
+        return None
+    pic = slide.shapes.add_picture(str(p), Cm(left), Cm(top))
+    ratio = pic.width / pic.height
+    w, h = width, width / ratio
+    if h > height:
+        h, w = height, height * ratio
+    pic.width, pic.height = Cm(w), Cm(h)
+    pic.left = Cm(left + (width - w if align == "right" else 0))
+    pic.top = Cm(top + (height - h) / 2)
+    return pic
+
+
+def footer(slide, st):
+    """design.footer_logo 가 있으면 하단 가로줄 + 로고 (footer_logo_align: right 기본 · left)."""
+    logo = st.design.get("footer_logo")
+    if not logo:
+        return
+    W, H = st.size
+    if st.design.get("footer_rule", True):
+        rect(slide, st, 0, H - 1.25, W, 0.03, "muted")
+    if st.footer_right:     # 고객사 로고가 있으면 왼쪽 우리 로고 · 오른쪽 고객사 로고
+        _picture(slide, logo, 1.0, H - 1.0, 2.6, 0.6, align="left")
+        _picture(slide, st.footer_right, W - 1.0 - 3.2, H - 1.0, 3.2, 0.6, align="right")
+    elif st.design.get("footer_logo_align", "right") == "left":
+        _picture(slide, logo, 1.0, H - 1.0, 2.6, 0.6, align="left")
+    else:
+        _picture(slide, logo, W - 1.0 - 2.6, H - 1.0, 2.6, 0.6, align="right")
+
+
+def number_position(st):
+    """쪽 번호 자리: 하단 로고 배치에 따라 center · left · right."""
+    if not st.design.get("footer_logo"):
+        return "right"
+    if st.footer_right:
+        return "center"
+    return "right" if st.design.get("footer_logo_align", "right") == "left" else "left"
 
 
 def page_number(slide, st, n):
     W, H = st.size
+    pos = number_position(st)
+    if pos == "left":
+        text(slide, st, 1.0, H - 0.9, 1.6, 0.5, str(n), size=9, color="muted", fit=False)
+        return
+    if pos == "center":
+        text(slide, st, W / 2 - 0.8, H - 0.9, 1.6, 0.5, str(n), size=9, color="muted", align=PP_ALIGN.CENTER, fit=False)
+        return
     text(slide, st, W - 2.0, H - 0.8, 1.6, 0.5, str(n), size=9, color="muted", align=PP_ALIGN.RIGHT, fit=False)
 
 
@@ -168,7 +236,37 @@ def _groups(items):
     return groups
 
 
-def _card(slide, st, g, x, y, w, h, size=13, highlight=False):
+def _split_conclusion(items):
+    """'▶ ' 로 시작하는 항목은 카드 맨 아래 결론 상자로 뺀다."""
+    body = [t for t in items if not t.startswith("▶")]
+    concl = [t.lstrip("▶").strip() for t in items if t.startswith("▶")]
+    return body, concl
+
+
+def _band_card(slide, st, g, x, y, w, h, size=13, highlight=None):
+    band_h = 1.0 if g["title"] else 0
+    if g["title"]:
+        title = g["title"] + ("  (권고안)" if highlight else "")
+        fill = "primary" if highlight or highlight is None else "muted"
+        b = rect(slide, st, x, y, w, band_h, fill, shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+        b.adjustments[0] = 0.2
+        label_in(b, st, title, _fit_size(title, w - 0.6, 0.8, size + 1))
+    top = y + band_h + (0.25 if band_h else 0)
+    box = rect(slide, st, x, top, w, h - (top - y), "FFFFFF", line="primary" if highlight else "muted")
+    if highlight:
+        box.line.width = Pt(2)
+    body, concl = _split_conclusion(g["items"])
+    concl_h = 1.3 * len(concl)
+    text(slide, st, x + 0.4, top + 0.35, w - 0.8, h - (top - y) - 0.6 - concl_h, [f"• {t}" for t in body],
+         size=size, spacing=8)
+    for i, c in enumerate(concl):
+        cb = rect(slide, st, x + 0.3, y + h - 0.2 - concl_h + i * 1.3, w - 0.6, 1.1, LIGHT_FILL)
+        label_in(cb, st, c, _fit_size(c, w - 1.0, 0.9, size), color="primary", font="emphasis")
+
+
+def _card(slide, st, g, x, y, w, h, size=13, highlight=None):
+    if st.band():
+        return _band_card(slide, st, g, x, y, w, h, size, highlight)
     rect(slide, st, x, y, w, h, LIGHT_FILL, line="accent" if highlight else None)
     rect(slide, st, x, y, w, 0.12, "accent" if highlight else "primary")
     if highlight:
@@ -182,9 +280,10 @@ def _card(slide, st, g, x, y, w, h, size=13, highlight=False):
 
 
 def card_height(g, w, size=13):
-    body = "\n".join(f"· {t}" for t in g["items"])
+    items, concl = _split_conclusion(g["items"])
+    body = "\n".join(f"· {t}" for t in items)
     n = lines_needed(body, w - 1.0, size)
-    return 0.35 + (1.0 if g["title"] else 0) + n * size * LINE_H * 1.25 + 0.5
+    return 0.35 + (1.25 if g["title"] else 0) + n * size * LINE_H * 1.35 + 0.6 + 1.3 * len(concl)
 
 
 MIN_CARD = 4.2      # 카드가 너무 납작해 보이지 않게 하는 최소 높이(cm)
@@ -216,7 +315,7 @@ def body_groups(slide, st, items, left, top, width, height, dry=False, message=N
         rec = recommended_index(groups, message) if message is not None else None
         if not dry:
             for i, g in enumerate(groups):
-                _card(slide, st, g, left + i * (w + gap), top, w, h, highlight=(i == rec))
+                _card(slide, st, g, left + i * (w + gap), top, w, h, highlight=None if rec is None else i == rec)
         return h
     lines = []
     for g in groups:
@@ -312,7 +411,7 @@ def body_steps(slide, st, steps, left, top, width, height, dry=False):
         return chev_h + 0.3 + card_h
     for i, (name, _) in enumerate(parsed):
         x = left + i * (w + gap)
-        chev = rect(slide, st, x, top, w, chev_h, "primary" if i == 0 else "accent",
+        chev = rect(slide, st, x, top, w, chev_h, "primary" if i == 0 or st.band() else "accent",
                     shape=MSO_SHAPE.PENTAGON if i == 0 else MSO_SHAPE.CHEVRON)
         label_in(chev, st, f"{i + 1:02d} {name}", name_size)
         if descs[i]:
@@ -369,8 +468,70 @@ def _section_parts(sec):
     return (int(m.group(1)), m.group(2).strip()) if m else (None, (sec or "").strip())
 
 
-def render(outline, cfg=None, out_path="deck.pptx", client_mark=None):
+SECTION_WORDS = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN"]
+
+
+def cover_panel(slide, st, meta, s):
+    """표지: 왼쪽 고객사 로고 · 건명 · 제안사, 오른쪽 사선 색 면."""
+    W, H = st.size
+    panel = rect(slide, st, W * 0.47, 1.2, W * 0.53 - 1.0, H - 2.6, "primary", shape=MSO_SHAPE.PARALLELOGRAM)
+    panel.adjustments[0] = 0.18
+    if st.cover_image:
+        size = min(W * 0.53 - 1.0, H - 2.6) * 0.5
+        cx, cy = W * 0.47 + (W * 0.53 - 1.0) / 2, 1.2 + (H - 2.6) / 2
+        _picture(slide, st.cover_image, cx - size / 2, cy - size / 2, size, size)
+    if st.client_logo:
+        _picture(slide, st.client_logo, 2.0, 3.2, 9.5, 1.8, align="left")
+    else:
+        text(slide, st, 2.0, 3.4, 11, 1.2, meta.get("고객사", ""), size=24, font="emphasis", color="primary", fit=False)
+    text(slide, st, 2.0, 7.6, 11.0, 2.8, meta.get("건명", meta.get("title", "")), size=26, font="emphasis", color="text")
+    if s.get("메시지"):
+        text(slide, st, 2.0, 10.6, 10.5, 1.8, s["메시지"], size=13, color="muted")
+    text(slide, st, 2.0, H - 4.0, 10, 0.8, meta.get("제안사", ""), size=14, color="text", fit=False)
+    text(slide, st, 2.0, H - 3.2, 10, 0.8, meta.get("날짜", ""), size=14, color="text", fit=False)
+
+
+def toc_list(slide, st, sections):
+    """목차: 왼쪽 색 면, 오른쪽 'N장 이름' 목록."""
+    W, H = st.size
+    rect(slide, st, 0, 0, W * 0.4, H, "primary")
+    text(slide, st, 1.8, H / 2 - 1.2, W * 0.4 - 3, 1.6, "CONTENTS", size=30, font="emphasis", color="white", fit=False)
+    x = W * 0.4 + 2.5
+    text(slide, st, x, 3.0, 10, 1.4, "목차", size=26, font="emphasis", color="primary", fit=False)
+    for i, (num, name) in enumerate(sections):
+        y = 5.0 + i * 1.45
+        text(slide, st, x, y, 1.8, 0.9, f"{num}장", size=16, font="emphasis", color="primary", fit=False)
+        text(slide, st, x + 1.9, y, W - x - 3, 0.9, name, size=16, color="text", fit=False)
+
+
+def divider_light(slide, st, num, name):
+    """간지: 흰 바탕, 큰 회색 번호 위에 SECTION 표기와 장 이름, 바닥 그라데이션 띠."""
+    W, H = st.size
+    if num is not None:
+        text(slide, st, 0, H / 2 - 3.2, W, 5.0, f"{num:02d}", size=120, font="title", color="E3E5EA",
+             align=PP_ALIGN.CENTER, fit=False)
+        word = SECTION_WORDS[num] if num < len(SECTION_WORDS) else str(num)
+        text(slide, st, 0, H / 2 - 2.6, W, 0.8, f"S E C T I O N   {' '.join(word)}", size=12, font="emphasis",
+             color="primary", align=PP_ALIGN.CENTER, fit=False)
+    text(slide, st, 0, H / 2 - 1.5, W, 1.8, name, size=34, font="emphasis", color="text", align=PP_ALIGN.CENTER, fit=False)
+    rect(slide, st, W / 2 - 3.3, H / 2 + 1.6, 6.6, 0.22, "E3E5EA")
+    bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, Cm(H - 0.45), Cm(W), Cm(0.45))
+    bar.line.fill.background()
+    bar.fill.gradient()
+    bar.fill.gradient_angle = 0
+    stops = bar.fill.gradient_stops
+    stops[0].color.rgb = st.color("primary")
+    stops[0].position = 0.0
+    stops[1].color.rgb = RGBColor.from_string("FFFFFF")
+    stops[1].position = 1.0
+
+
+def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_logo=None, cover_image=None,
+           footer_right=None):
     st = Style(cfg)
+    st.footer_right = footer_right
+    st.client_logo = client_logo
+    st.cover_image = cover_image
     prs = Presentation()
     W, H = st.size
     prs.slide_width, prs.slide_height = Cm(W), Cm(H)
@@ -383,14 +544,20 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None):
             sections.append((num, name))
     hdr = st.header
     body_left, body_top = hdr["message"]["left"], hdr["body_top"]
-    body_w, body_h = hdr["message"]["width"], H - body_top - 1.1
+    body_w, body_h = hdr["message"]["width"], H - body_top - (1.7 if st.design.get("footer_logo") else 1.1)
     made = []
     for s in outline["slides"]:
         if not s.get("type"):
             continue
         slide = prs.slides.add_slide(blank)
         t = s["type"]
-        if t == "T01":
+        if t == "T01" and st.design.get("cover") == "panel":
+            cover_panel(slide, st, meta, s)
+        elif t == "T02" and st.design.get("toc") == "list":
+            toc_list(slide, st, sections)
+        elif t == "T03" and st.design.get("divider") == "light":
+            divider_light(slide, st, *_section_parts(s.get("섹션")))
+        elif t == "T01":
             rect(slide, st, 0, 0, 1.2, H, "primary")
             text(slide, st, 2.5, 5.2, W - 5, 1.0, meta.get("고객사", ""), size=16, font="emphasis", color="muted", fit=False)
             text(slide, st, 2.5, 6.4, W - 5, 3.2, meta.get("건명", meta.get("title", "")), size=32, font="title", color="primary")
@@ -447,6 +614,8 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None):
             layout(False, body_top + 0.2 + free * 0.3)   # 남는 공간은 위 30% · 아래 70% 로 나눈다
         if t not in ("T01", "T03"):
             page_number(slide, st, len(prs.slides))
+        if t not in ("T01", "T02", "T03", "T04"):
+            footer(slide, st)
         made.append({"n": len(prs.slides), "outline_n": s.get("n"), "type": t})
     prs.save(out_path)
     return {"slides": len(prs.slides), "made": made, "font_swaps": st.font_swaps}

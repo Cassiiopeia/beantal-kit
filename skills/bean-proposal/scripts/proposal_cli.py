@@ -331,15 +331,42 @@ def cmd_render(a):
     from proposal_lib.render import render
     from proposal_lib.setup import load_config
     cfg, _ = load_config()
+    if a.design or a.color:
+        from proposal_lib import designs
+        try:
+            preset = designs.load_design(a.design) if a.design else {}
+        except FileNotFoundError as e:
+            return emit({"ok": False, "code": "design_missing", "summary": str(e), "next": "design-list"})
+        cfg = designs.apply_design(cfg, preset, designs.parse_colors(a.color))
     parsed = ol.parse_outline(ol.load(expand(a.outline)))
     out = expand(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    r = render(parsed, cfg, str(out), client_mark=a.client_mark)
+    logo = str(expand(a.client_logo)) if a.client_logo else None
+    cover = str(expand(a.cover_image)) if a.cover_image else None
+    fright = str(expand(a.footer_client_logo)) if a.footer_client_logo else None
+    r = render(parsed, cfg, str(out), client_mark=a.client_mark, client_logo=logo, cover_image=cover, footer_right=fright)
     if a.project:
         from proposal_lib.project import record_version
         record_version(expand(a.project), out.relative_to(expand(a.project)) if str(out).startswith(str(expand(a.project))) else out, a.change or "render")
     return emit({"ok": True, "code": "rendered", "summary": f"{r['slides']}장 생성: {out.name}", "path": str(out), **r,
                  "next": f"review \"{out}\""})
+
+
+def cmd_design_list(a):
+    from proposal_lib import designs
+    items = designs.list_designs()
+    return emit({"ok": True, "code": "designs", "summary": f"디자인 {len(items)}개", "designs": items,
+                 "dir": str(designs.DESIGNS_DIR), "next": "render … --design <이름> [--color primary=RRGGBB]"})
+
+
+def cmd_design_save(a):
+    from proposal_lib import designs
+    try:
+        data = json.loads(a.json)
+    except ValueError as e:
+        return emit({"ok": False, "code": "bad_json", "summary": str(e)})
+    p = designs.save_design(a.name, data)
+    return emit({"ok": True, "code": "design_saved", "summary": f"디자인 '{a.name}' 저장", "path": str(p)})
 
 
 def cmd_review(a):
@@ -470,7 +497,9 @@ def main():
     p = sp.add_parser("pdf-view"); p.add_argument("file"); p.add_argument("--pages"); p.add_argument("--scale", type=float, default=1.6); p.set_defaults(fn=cmd_pdf_view)
     p = sp.add_parser("snapshot"); p.add_argument("file"); p.add_argument("--out"); p.add_argument("--slides"); p.set_defaults(fn=cmd_snapshot)
     p = sp.add_parser("outline-renumber"); p.add_argument("outline"); p.set_defaults(fn=cmd_outline_renumber)
-    p = sp.add_parser("render"); p.add_argument("outline"); p.add_argument("--out", required=True); p.add_argument("--project"); p.add_argument("--change"); p.add_argument("--client-mark"); p.set_defaults(fn=cmd_render)
+    p = sp.add_parser("render"); p.add_argument("outline"); p.add_argument("--out", required=True); p.add_argument("--project"); p.add_argument("--change"); p.add_argument("--client-mark"); p.add_argument("--client-logo", help="헤더 오른쪽 위·표지에 넣을 고객사 로고 이미지"); p.add_argument("--footer-client-logo", help="본문 장 우측 하단 고객사 로고 (우리 로고는 좌측으로 간다)"); p.add_argument("--cover-image", help="표지 색 면 위에 올릴 이미지 (cover: panel)"); p.add_argument("--design", help="디자인 프리셋 이름 (design-list)"); p.add_argument("--color", help="색 덮어쓰기 primary=RRGGBB,accent=RRGGBB"); p.set_defaults(fn=cmd_render)
+    p = sp.add_parser("design-list"); p.set_defaults(fn=cmd_design_list)
+    p = sp.add_parser("design-save"); p.add_argument("--name", required=True); p.add_argument("--json", required=True, help="fonts·colors·header·design·description·source"); p.set_defaults(fn=cmd_design_save)
     p = sp.add_parser("ref-add"); p.add_argument("--client", required=True); p.add_argument("--title", required=True); p.add_argument("--year"); p.add_argument("--id"); p.add_argument("--quality", default="reference", choices=["gold", "reference", "wip"]); p.add_argument("--file", action="append", required=True, help="역할=경로 (여러 번)"); p.add_argument("--note"); p.set_defaults(fn=cmd_ref_add)
     sp.add_parser("ref-migrate").set_defaults(fn=cmd_ref_migrate)
     p = sp.add_parser("ref-digest"); p.add_argument("id", nargs="*"); p.set_defaults(fn=cmd_ref_digest)
