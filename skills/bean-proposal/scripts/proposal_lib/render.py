@@ -420,6 +420,129 @@ def body_steps(slide, st, steps, left, top, width, height, dry=False):
     return chev_h + 0.3 + card_h
 
 
+def _mix_white(hexcolor, t):
+    """색을 흰색 쪽으로 t(0~1) 만큼 섞은 6자리 hex."""
+    r, g, b = (int(hexcolor[i:i + 2], 16) for i in (0, 2, 4))
+    return "".join(f"{int(c + (255 - c) * t):02X}" for c in (r, g, b))
+
+
+def _cell_border(cell, color="BFBFBF", width_pt=0.75):
+    from lxml import etree
+    from pptx.oxml.ns import qn
+    tcPr = cell._tc.get_or_add_tcPr()
+    for i, tag in enumerate(("a:lnL", "a:lnR", "a:lnT", "a:lnB")):
+        old = tcPr.find(qn(tag))
+        if old is not None:
+            tcPr.remove(old)
+        ln = etree.Element(qn(tag), w=str(int(width_pt * 12700)), cap="flat", cmpd="sng", algn="ctr")
+        etree.SubElement(etree.SubElement(ln, qn("a:solidFill")), qn("a:srgbClr"), val=color)
+        etree.SubElement(ln, qn("a:prstDash"), val="solid")
+        tcPr.insert(i, ln)       # 테두리는 채우기보다 앞에 와야 한다
+
+
+def _cell_text(cell, st, value, size, color, font="body", bold=False, align=PP_ALIGN.CENTER, fill=None):
+    cell.text = ""
+    p = cell.text_frame.paragraphs[0]
+    p.alignment = align
+    r = p.add_run()
+    r.text = value
+    r.font.size = Pt(size)
+    r.font.name = st.font(font)
+    r.font.bold = bold
+    r.font.color.rgb = RGBColor.from_string(color) if HEX.fullmatch(color) else st.color(color)
+    cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+    cell.margin_left = cell.margin_right = Cm(0.15)
+    cell.margin_top = cell.margin_bottom = Cm(0.02)
+    cell.fill.solid()
+    cell.fill.fore_color.rgb = RGBColor.from_string(fill or "FFFFFF")
+    _cell_border(cell)
+
+
+def body_timeline(slide, st, rows, periods, left, top, width, height, dry=False):
+    """타임테이블(간트): 월·주 2단 머리 + 항목 묶음 + 기간 칸 위 화살표 막대.
+    rows: [머리, (항목, 세부 일정, 시작, 끝, 표시)...], periods: ['10월 4W', '11월 1W', ...]"""
+    data = [r + [""] * (5 - len(r)) for r in rows[1:]]
+    if not data or not periods:
+        return 0
+    two = any(" " in p for p in periods)
+    nh = 2 if two else 1
+    nrows, ncols = len(data) + nh, 2 + len(periods)
+    row_h = max(0.5, min(0.8, (height - 0.3) / nrows))
+    if dry:
+        return row_h * nrows
+    c0, c1 = 2.4, min(7.0, width * 0.3)
+    ww = (width - c0 - c1) / len(periods)
+    shape = slide.shapes.add_table(nrows, ncols, Cm(left), Cm(top), Cm(width), Cm(row_h * nrows))
+    tbl = shape.table
+    tbl.first_row = tbl.horz_banding = False
+    for j, w in enumerate([c0, c1] + [ww] * len(periods)):
+        tbl.columns[j].width = Cm(w)
+    for i in range(nrows):
+        tbl.rows[i].height = Cm(row_h)
+    head_fill = st.colors.get("text", "414756")
+    months = [p.split(" ", 1)[0] for p in periods]
+    weeks = [p.split(" ", 1)[1] if " " in p else p for p in periods]
+    # 머리 1단: Time Table | 월(묶음)
+    for j in range(ncols):
+        _cell_text(tbl.cell(0, j), st, "", 11, "white", "emphasis", fill=head_fill)
+    _cell_text(tbl.cell(0, 0), st, rows[0][0] if rows[0] and rows[0][0] not in ("", "항목") else "Time Table",
+               11, "white", "emphasis", fill=head_fill)
+    tbl.cell(0, 0).merge(tbl.cell(0, 1))
+    j = 0
+    while j < len(periods):
+        k = j
+        while two and k + 1 < len(periods) and months[k + 1] == months[j]:
+            k += 1
+        _cell_text(tbl.cell(0, 2 + j), st, months[j] if two else periods[j], 11, "white", "emphasis", fill=head_fill)
+        if k > j:
+            tbl.cell(0, 2 + j).merge(tbl.cell(0, 2 + k))
+        j = k + 1
+    if two:     # 머리 2단: 항목 | 세부 일정 | 주
+        for j, v in enumerate(["항목", "세부 일정"] + weeks):
+            _cell_text(tbl.cell(1, j), st, v, 10, "white", "emphasis", fill=_mix_white(head_fill, 0.15))
+    # 본문: 항목은 같은 값끼리 세로로 합친다
+    for i, r in enumerate(data):
+        ri = nh + i
+        same = i > 0 and r[0] in (data[i - 1][0], "")
+        _cell_text(tbl.cell(ri, 0), st, "" if same else r[0], 10, "text", "emphasis")   # 합칠 칸은 첫 칸에만 글자
+        _cell_text(tbl.cell(ri, 1), st, r[1], 10, "text", align=PP_ALIGN.LEFT)
+        for j in range(len(periods)):
+            _cell_text(tbl.cell(ri, 2 + j), st, "", 9, "text")
+    i = 0
+    while i < len(data):
+        k = i
+        while k + 1 < len(data) and data[k + 1][0] in (data[i][0], ""):
+            k += 1
+        if k > i:
+            tbl.cell(nh + i, 0).merge(tbl.cell(nh + k, 0))
+        i = k + 1
+    # 막대: 시작 칸 왼쪽 ~ 끝 칸 오른쪽, 짙은·옅은 색 번갈아
+    dark, light = st.colors.get("accent", "4D74B4"), _mix_white(st.colors.get("accent", "4D74B4"), 0.45)
+    for i, r in enumerate(data):
+        if r[2] not in periods or r[3] not in periods:
+            continue
+        si, ei = periods.index(r[2]), periods.index(r[3])
+        x0 = left + c0 + c1 + si * ww
+        bw = (ei - si + 1) * ww
+        y = top + (nh + i) * row_h + row_h * 0.14
+        bar = rect(slide, st, x0, y, bw, row_h * 0.72, dark if i % 2 == 0 else light, shape=MSO_SHAPE.PENTAGON)
+        bar.adjustments[0] = min(0.5, 0.35 * (row_h * 0.72) / bw * 2)
+        label = r[4] if r[4] not in ("", "-") else ("완료" if r[4] == "" else "")
+        if label:
+            tf = bar.text_frame
+            tf.margin_right = Cm(0.45)
+            tf.margin_left = Cm(0.05)
+            tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+            p = tf.paragraphs[0]
+            p.alignment = PP_ALIGN.RIGHT
+            run = p.add_run()
+            run.text = label
+            run.font.size = Pt(10)
+            run.font.name = st.font("emphasis")
+            run.font.color.rgb = st.color("white") if i % 2 == 0 else st.color("text")
+    return row_h * nrows
+
+
 def body_chart(slide, st, rows, left, top, width, height, dry=False):
     if not rows or len(rows) < 2:
         return 0
@@ -439,6 +562,20 @@ def body_chart(slide, st, rows, left, top, width, height, dry=False):
     gf = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Cm(left), Cm(top), Cm(width), Cm(height), cd)
     ch = gf.chart
     ch.has_legend = len(head) > 2
+    if len(head) == 2:      # 계열 하나: 제목은 작게, 막대 위에 값 표시
+        ch.has_title = True
+        ch.chart_title.text_frame.text = head[1]
+        tr = ch.chart_title.text_frame.paragraphs[0].runs[0]
+        tr.font.size = Pt(12)
+        tr.font.bold = False
+        tr.font.name = st.font("emphasis")
+        tr.font.color.rgb = st.color("text")
+        plot = ch.plots[0]
+        plot.has_data_labels = True
+        plot.data_labels.number_format = "#,##0"
+        plot.data_labels.number_format_is_linked = False
+        plot.data_labels.font.size = Pt(10)
+        plot.data_labels.font.color.rgb = st.color("text")
     if ch.has_legend:
         ch.legend.position = XL_LEGEND_POSITION.TOP
         ch.legend.include_in_layout = False
@@ -530,6 +667,10 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
            footer_right=None):
     st = Style(cfg)
     st.footer_right = footer_right
+    if client_logo:     # 우측 상단에 고객사 로고가 있으면 하단엔 다시 넣지 않는다: 왼쪽 회사 로고 · 오른쪽 쪽 번호
+        st.footer_right = None
+        if st.design.get("footer_logo"):
+            st.design["footer_logo_align"] = "left"
     st.client_logo = client_logo
     st.cover_image = cover_image
     prs = Presentation()
@@ -589,7 +730,7 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
         else:
             num, name = _section_parts(s.get("섹션"))
             header(slide, st, num, name, s.get("제목"), s.get("메시지"), client_mark)
-            parts = [k for k in ("본문", "표", "단계", "데이터") if s.get(k)]
+            parts = [k for k in ("본문", "표", "단계", "데이터", "일정") if s.get(k)]
             if t[0] == "L" and not parts:
                 text(slide, st, body_left, body_top + 2, body_w, 2, "[확인 필요: 회사 소개 라이브러리 장표 삽입 — library.json company-intro]", size=14)
             if t == "C01":
@@ -598,7 +739,9 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
                 body_fn = lambda *a, **k: body_groups(*a, message=s.get("메시지"), **k)
             else:
                 body_fn = body_groups
-            draw = {"본문": body_fn, "표": body_table, "단계": body_steps, "데이터": body_chart}
+            periods = [p.strip() for p in re.split(r"[,，]", s.get("기간", "")) if p.strip()]
+            draw = {"본문": body_fn, "표": body_table, "단계": body_steps, "데이터": body_chart,
+                    "일정": lambda sl, st_, rows, *a, **k: body_timeline(sl, st_, rows, periods, *a, **k)}
 
             def layout(dry, y0):
                 y, remain = y0, body_h - 0.2

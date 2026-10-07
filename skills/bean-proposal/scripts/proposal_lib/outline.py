@@ -27,6 +27,10 @@ outline.md 형식 (슬라이드 한 장 = '## ' 블록):
     - 데이터:
       | 월 | 택배 | 우편 |
       | 1월 | 1200 | 800 |
+    - 기간: 10월 4W, 11월 1W, 11월 2W        (C12 타임테이블의 열)
+    - 일정:
+      | 항목 | 세부 일정 | 시작 | 끝 | 표시 |
+      | 계약 | 계약 체결 | 10월 4W | 10월 4W | |
     - 상태: 초안
 """
 import re
@@ -38,11 +42,11 @@ TYPES = {
     "T01": "표지", "T02": "목차", "T03": "간지", "T04": "마무리",
     "C01": "제안 방향", "C02": "요건 대응 총괄", "C03": "요건 대응표", "C04": "프로세스/흐름",
     "C05": "현황 분석(차트)", "C06": "거점/센터", "C07": "비교안", "C08": "일정",
-    "C09": "사례/실적", "C10": "보안·증빙", "C11": "정산·단가",
+    "C09": "사례/실적", "C10": "보안·증빙", "C11": "정산·단가", "C12": "타임테이블",
     "L01": "회사 소개", "L02": "회사 소개", "L03": "회사 소개", "L04": "회사 소개", "L05": "회사 소개", "L06": "회사 소개",
 }
 LIST_FIELDS = {"본문", "단계"}
-TABLE_FIELDS = {"표", "데이터"}
+TABLE_FIELDS = {"표", "데이터", "일정"}
 NEEDS_HEADER = {k for k in TYPES if k[0] in "CL"}
 REQUIRED_KINDS = ("작성요청", "평가", "SLA", "업무범위")
 
@@ -127,6 +131,25 @@ def parse_requirements(text):
     return reqs
 
 
+def timeline_periods(s):
+    return [p.strip() for p in re.split(r"[,，]", s.get("기간", "")) if p.strip()]
+
+
+def check_timeline(s, where):
+    """C12: 기간 열과 일정 행(항목 | 세부 일정 | 시작 | 끝 | 표시)이 맞는지."""
+    f, periods = [], timeline_periods(s)
+    rows = s.get("일정") or []
+    if not periods or len(rows) < 2:
+        return [{"sev": "warn", "slide": where, "code": "O14", "msg": "타임테이블인데 '기간:' 또는 '일정:' 이 없습니다"}]
+    for r in rows[1:]:
+        start, end = (r + ["", "", "", ""])[2:4]
+        if start not in periods or end not in periods:
+            f.append({"sev": "error", "slide": where, "code": "O15", "msg": f"일정 '{r[1] if len(r) > 1 else r}' 의 시작·끝이 기간에 없습니다 ({start} ~ {end})"})
+        elif periods.index(start) > periods.index(end):
+            f.append({"sev": "error", "slide": where, "code": "O15", "msg": f"일정 '{r[1]}' 의 시작이 끝보다 늦습니다"})
+    return f
+
+
 def check_outline(parsed, reqs=None, tone_check=None):
     """형식·추적성 검사. 반환: findings 목록."""
     f = []
@@ -155,6 +178,8 @@ def check_outline(parsed, reqs=None, tone_check=None):
             f.append({"sev": "warn", "slide": where, "code": "O07", "msg": "프로세스 유형인데 '단계:' 가 없습니다"})
         if s["type"] == "C05" and not s.get("데이터"):
             f.append({"sev": "warn", "slide": where, "code": "O08", "msg": "차트 유형인데 '데이터:' 가 없습니다"})
+        if s["type"] == "C12":
+            f += check_timeline(s, where)
         if tone_check and s.get("메시지") and s["type"][0] == "C":
             for issue in tone_check(s["메시지"]):
                 f.append({"sev": "warn", "slide": where, "code": "O09", "msg": issue})
