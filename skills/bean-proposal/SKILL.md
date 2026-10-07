@@ -127,6 +127,13 @@ PYTHON=$(command -v python3 || command -v python)
 | S7 점검 | 자동 점검 + 화면 확인 + 6축 채점 | `review <덱> [--requirements …] [--client …] --md 05_점검/review_vNN.md`, `snapshot <덱> [--slides 1,4,9]` | review_vNN.md · **G4** (🟥 0건) |
 | S8 제출 | 제출 서류 체크리스트, 최종본 확정 | `status <폴더>` | checklist.md · **G5** |
 
+- **디자인 프리셋**: 참고 제안서의 모양을 이름 붙여 저장해 두고 골라 쓴다 (`~/.beantal-kit/configs/bean-proposal/designs/<이름>.json`).
+  - S6 에서 렌더하기 전에 `design-list` 로 목록을 보여 주고 AskUserQuestion 으로 고르게 한다 (기본 config 모양도 선택지에 넣는다).
+  - 쓰기: `render … --design <이름> [--color primary=RRGGBB,accent=RRGGBB] [--client-logo <로고.png>] [--cover-image <엠블럼.png>] [--footer-client-logo <고객사 로고.png>]`. 고객사 로고를 주면 하단은 왼쪽 우리 로고 · 오른쪽 고객사 로고 · 가운데 쪽 번호. 프리셋의 `color_policy` 가 `client` 이면 고객사 CI 색을 `--color` 로 넘긴다. CI 색은 고객 자료(RFP 표지 로고 등)에서 뽑고 지어내지 않는다.
+  - 저장: 사용자가 "이 디자인 저장해줘"라고 하면 `profile` 실측값과 화면 확인 결과로 `design-save --name <이름> --json '{…}'` (칸: description, source, color_policy, fonts, colors, header, design).
+  - `design` 칸: `card: band`(둥근 색 띠 소제목 + 테두리 박스, `▶ ` 로 시작하는 항목은 카드 맨 아래 결론 상자), `divider: light`(흰 간지), `cover: panel`, `toc: list`, `rule: <cm>`(헤더 아래 가로줄), `footer_logo: <이미지 경로>`, `footer_logo_align: right`(기본, 쪽 번호는 왼쪽) · `left`.
+  - 고객사 로고는 프로젝트 `00_입력/` 에, 회사 로고는 `~/.beantal-kit/shared/company/` 에 둔다 (레포에 넣지 않는다).
+- 렌더러로 레이아웃을 바꾼 버전은 `version-new` 대신 `render --project` 로 다음 번호를 만든다. 이때 직전 버전에 PowerPoint 직접 수정이 없었는지(outline.md 저장 시각과 pptx 시각) 먼저 확인한다.
 - v02 이후 수정: `version-new <프로젝트> --change "5장 SLA 수치 수정"` 로 복사한 뒤 `edit <새 vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'` 로 글자를 바꾼다 (slide 0 = 전체 장). DRM 덱도 PowerPoint 경유로 고친다. 최신 버전이 아닌 파일은 `edit` 이 거절한다. 장 추가·삭제·배치 변경처럼 글자 교체로 안 되는 수정은 사용자와 함께 PowerPoint 에서 하고 다음 번호로 저장하게 한다.
 - 변경 이력은 `project.json` 의 `versions` 에 쌓인다 (버전, 날짜, 기준 파일, 바꾼 이유). 새 대화에서 이어 작업할 때는 `status <프로젝트>` 와 이 이력을 먼저 읽는다.
 - `outline-check` 의 커버리지 오류(O12)는 빠진 요건이다. 장을 추가하거나 기존 장 근거에 연결한 뒤 다시 확인한다.
