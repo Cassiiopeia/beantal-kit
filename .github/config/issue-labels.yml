@@ -33,3 +33,11 @@
 - name: 취소
   color: f28b25
   description: 작업 취소됨
+
+- name: 자동수리
+  color: 5319E7
+  description: bean-skill-manager 가 자동으로 진행한 작업
+
+- name: 확인필요
+  color: FBCA04
+  description: 자동 처리 중 보류되어 메인테이너 확인이 필요한 상태

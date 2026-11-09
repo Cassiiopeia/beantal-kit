@@ -5,7 +5,7 @@
 ## 규칙
 
 1. 버전의 단일 기준은 `version.yml`이며 projectops가 관리한다. `package.json`, `.claude-plugin/*.json`, `.codex-plugin/plugin.json`의 version은 `PROJECT-PLUGIN-VERSION-SYNC` 워크플로우(`scripts/sync-version.js`)가 동기화하므로 직접 고치지 않는다. 새 skill이 사용자에게 전달되려면 버전이 올라가야 한다(Claude Code는 플러그인을 버전별로 캐시).
-2. skill 추가·수정은 `skills/bean-<이름>/SKILL.md`만 건드린다(설치기 코드 수정 금지). 추가 후 `npm run check` 통과가 필수다.
+2. skill 추가·수정은 `skills/bean-<이름>/` 폴더만 건드린다(설치기 코드 수정 금지). 플러그인 hook 은 `hooks/` 에 두며 활성화한 PC에서만 동작해야 한다. 추가 후 `npm run check` 통과가 필수다.
 3. 새 skill은 `npm run new-skill <이름>`으로 만들고, 폴더명 = frontmatter `name` = `bean-` 접두사를 지킨다. `description`에는 트리거 문구를 구체적으로 쓴다.
 4. 새 에이전트 지원은 `src/adapters/<id>.js` 추가 + `registry.js` 1줄. 오케스트레이터(`src/commands/`, `src/cli.js`)는 수정하지 않는다.
 5. 의존성을 추가하지 않는다(Node 내장 모듈만, Node >= 20.12). 어댑터는 예외를 던지지 않고 `io`(`which/run/home/log`)로만 외부와 통신한다.
@@ -37,6 +37,7 @@
 ## 구조
 
 - `skills/` : skill 저장소(Claude Code·Codex 공유)
+- `hooks/` : Claude Code 플러그인 hook
 - `src/adapters/` : 에이전트별 `detect/apply/remove` 구현 + `registry.js`
 - `src/commands/`, `src/cli.js` : 어댑터를 순회하는 오케스트레이터
 - `scripts/` : `new-skill`, `check-skills`

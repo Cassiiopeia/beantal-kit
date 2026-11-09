@@ -1,0 +1,14 @@
+{
+  "skill-manager": {
+    "_comment_repo_path": "이 PC에 clone 한 beantal-kit 레포 폴더. 첫 설정 때 대화로 찾아 저장한다. 예: ~/Desktop/beantal-kit",
+    "repo_path": "",
+    "_comment_enabled": "자동 수리 사용 여부. true 인 PC에서만 hook 과 뒷단이 작동한다",
+    "enabled": false,
+    "_comment_maintainer_github": "이슈 담당자로 지정할 메인테이너 GitHub 아이디. 비우면 지정하지 않는다",
+    "maintainer_github": "",
+    "_comment_daily_deploy_limit": "이 PC에서 하루에 자동 배포할 수 있는 최대 횟수",
+    "daily_deploy_limit": 3
+  },
+  "_required": ["skill-manager.repo_path"],
+  "language": "ko"
+}

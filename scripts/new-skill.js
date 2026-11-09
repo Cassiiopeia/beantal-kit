@@ -39,6 +39,17 @@ function osSection() {
   ].join("\n");
 }
 
+// 설정 칸이 없는 개인 취향의 저장 위치. 업데이트와 무관하게 유지된다.
+function preferencesSection(name) {
+  return [
+    "",
+    "## 개인 취향",
+    "",
+    `시작할 때 \`~/.beantal-kit/configs/${name}/preferences.md\` 가 있으면 읽어 따른다.`,
+    "",
+  ].join("\n");
+}
+
 function configExample(short) {
   return JSON.stringify({
     [short]: {
@@ -73,7 +84,7 @@ description: "이 skill이 언제 쓰이는지 트리거 문구와 함께 구체
 
 1.
 `;
-  writeFileSync(path, body + osSection() + (config ? configSection(name) : ""));
+  writeFileSync(path, body + osSection() + preferencesSection(name) + (config ? configSection(name) : ""));
   if (config) writeFileSync(join(dir, "config.json.example"), configExample(name.slice(PREFIX.length)));
   return { path };
 }
