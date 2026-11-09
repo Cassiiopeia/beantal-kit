@@ -1,6 +1,18 @@
 {
   "description": "beantal-kit: bean-skill-manager 를 활성화한 PC에서 수정 요구 분류 안내 주입",
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill_manager_session_hook.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

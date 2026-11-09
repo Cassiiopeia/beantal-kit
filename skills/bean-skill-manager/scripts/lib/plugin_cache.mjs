@@ -1,5 +1,5 @@
-// Claude Code 플러그인 캐시 반영: 설치 경로 조회, 백업 후 덮어쓰기 (파일 삭제 없음)
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+// Claude Code 플러그인 캐시 반영: 설치 경로 조회, 대화 중 저장, 새 대화 시작 시 백업 후 덮어쓰기
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 
@@ -39,21 +39,64 @@ function copyWithParents(sourcePath, targetPath) {
   copyFileSync(sourcePath, targetPath);
 }
 
-/**
- * skill 파일 캐시 반영: 대상 검증 > 파일 검증 > 백업 > 덮어쓰기
- * relativeFiles null: 폴더 전체 (새 skill)
- */
-export function applySkillFilesToCache({ sourceSkillDirectory, installPath, skillName, relativeFiles, backupDirectory }) {
+// 복사 전 전체 검증 (일부만 바뀐 상태 방지) > 복사할 파일 목록
+function resolveValidatedFiles({ sourceSkillDirectory, skillName, relativeFiles }) {
   if (!REPAIRABLE_SKILL_NAME.test(skillName) || skillName === SELF_SKILL_NAME) {
     throw new Error(`반영할 수 없는 대상입니다: ${skillName}`);
   }
   const filesToCopy = relativeFiles ?? listFilesRelativeTo(sourceSkillDirectory);
-
-  // 검증 먼저 (일부만 바뀐 상태 방지)
   for (const relativePath of filesToCopy) {
     if (!isSafeRelativePath(relativePath)) throw new Error(`허용되지 않는 경로입니다: ${relativePath}`);
     if (!existsSync(join(sourceSkillDirectory, relativePath))) throw new Error(`원본에 파일이 없습니다: ${relativePath}`);
   }
+  return filesToCopy;
+}
+
+/**
+ * 대화 중 저장만 수행 (scripts/ 는 실행마다 캐시에서 읽히므로 작업 중 교체 금지)
+ * 구조: {stagingDirectory}/{skill}/files/..., {skill}/target.json
+ */
+export function stageSkillFilesForNextConversation({ sourceSkillDirectory, stagingDirectory, installPath, skillName, relativeFiles }) {
+  const filesToStage = resolveValidatedFiles({ sourceSkillDirectory, skillName, relativeFiles });
+  for (const relativePath of filesToStage) {
+    copyWithParents(join(sourceSkillDirectory, relativePath), join(stagingDirectory, skillName, "files", relativePath));
+  }
+  writeFileSync(join(stagingDirectory, skillName, "target.json"), JSON.stringify({ installPath }));
+  return { stagedFiles: filesToStage };
+}
+
+/** 새 대화 시작 시 대기본 반영 (플러그인이 업데이트돼 경로가 다르면 최신본 보호를 위해 폐기) */
+export function applyStagedSkillFiles({ stagingDirectory, installPath, backupRootDirectory }) {
+  const outcome = { appliedSkills: [], discardedSkills: [] };
+  if (!existsSync(stagingDirectory)) return outcome;
+  // 백업: {backupRootDirectory}/{skill}/{yyyyMMddHHmmss}
+  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+  for (const skillName of readdirSync(stagingDirectory)) {
+    const stagedSkillDirectory = join(stagingDirectory, skillName);
+    const { installPath: stagedInstallPath } = JSON.parse(readFileSync(join(stagedSkillDirectory, "target.json"), "utf8"));
+    if (stagedInstallPath === installPath) {
+      applySkillFilesToCache({
+        sourceSkillDirectory: join(stagedSkillDirectory, "files"),
+        installPath,
+        skillName,
+        relativeFiles: null,
+        backupDirectory: join(backupRootDirectory, skillName, stamp),
+      });
+      outcome.appliedSkills.push(skillName);
+    } else {
+      outcome.discardedSkills.push(skillName);
+    }
+    rmSync(stagedSkillDirectory, { recursive: true, force: true });
+  }
+  return outcome;
+}
+
+/**
+ * skill 파일 캐시 반영: 대상·파일 검증 > 백업 > 덮어쓰기
+ * relativeFiles null: 폴더 전체 (새 skill)
+ */
+export function applySkillFilesToCache({ sourceSkillDirectory, installPath, skillName, relativeFiles, backupDirectory }) {
+  const filesToCopy = resolveValidatedFiles({ sourceSkillDirectory, skillName, relativeFiles });
 
   const cacheSkillDirectory = join(installPath, "skills", skillName);
   const backedUpFiles = [];

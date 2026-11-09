@@ -22,6 +22,6 @@
 
 1. Claude Code 는 플러그인을 `<Claude 설정 폴더>/plugins/cache/<마켓플레이스>/beantal-kit/<버전>/` 에 버전별로 보관한다.
 2. 어느 폴더를 쓰는지는 `<Claude 설정 폴더>/plugins/installed_plugins.json` 의 `installPath` 에 있다. Claude 설정 폴더는 `CLAUDE_CONFIG_DIR`, 없으면 `~/.claude` 다.
-3. 새 버전이 배포되어야 다른 사용자가 받는다. 그 전에 지금 PC에서 쓰려면 `apply-cache` 로 현재 `installPath` 에 덮어쓴다.
-4. 덮어쓴 내용은 새 대화부터 적용된다. 플러그인이 업데이트되면 새 폴더가 생기므로, 공용 반영이 안 된 수정은 사라진다. 그래서 대기 건은 대기열에 남겨 재시도한다.
+3. 새 버전이 배포되어야 다른 사용자가 받는다. 그 전에 지금 PC에서 쓰려면 `apply-cache` 로 저장해 둔다. 다음 새 대화가 시작될 때 hook 이 현재 `installPath` 에 덮어쓴다.
+4. `scripts/` 는 실행할 때마다 캐시에서 읽히므로 작업 중에는 교체하지 않는다. 저장 후 플러그인이 업데이트되어 폴더가 바뀌면 최신본 보호를 위해 저장분을 폐기한다.
 5. 사용자 설정은 `~/.beantal-kit/` 에 있어 업데이트와 무관하다.

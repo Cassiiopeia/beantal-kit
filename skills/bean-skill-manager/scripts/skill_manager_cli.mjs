@@ -7,15 +7,16 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { isAutomationEnabled, readSkillManagerConfig, resolveBeantalKitHome, resolveSkillManagerDirectory } from "./lib/config_store.mjs";
-import { applySkillFilesToCache, findPluginInstallPath, resolveClaudeConfigDirectory } from "./lib/plugin_cache.mjs";
+import { findPluginInstallPath, resolveClaudeConfigDirectory, stageSkillFilesForNextConversation } from "./lib/plugin_cache.mjs";
 import { decideReleaseAction } from "./lib/release_gate.mjs";
 import { collectSensitiveTerms, findSensitiveTerms } from "./lib/sensitive_scan.mjs";
-import { acquireRepairLock, completeRepair, countDeploysOn, enqueueRepair, listPendingRepairs, recordDeploy, releaseRepairLock } from "./lib/work_queue.mjs";
+import { acquireRepairLock, completeRepair, countDeploysOn, enqueueRepair, listAwaitingRepairs, listPendingRepairs, markRepairAwaitingRelease, recordDeploy, releaseRepairLock } from "./lib/work_queue.mjs";
 
 const beantalKitHome = resolveBeantalKitHome();
 const managerDirectory = resolveSkillManagerDirectory(beantalKitHome);
 const config = readSkillManagerConfig(beantalKitHome);
 
+const splitList = (text) => (text || "").split(",").filter(Boolean);
 const createResult = (ok, code, summary, next = null, extra = {}) => ({ ok, code, summary, next, ...extra });
 
 function readStatus() {
@@ -33,16 +34,14 @@ function readStatus() {
 function applyCache(options) {
   const installPath = findPluginInstallPath(resolveClaudeConfigDirectory());
   if (!installPath) return createResult(false, "not_installed", "beantal-kit plugin is not installed", "npx beantal-kit");
-  // 백업: {설정 폴더}/backups/{skill}/{yyyyMMddHHmmss}
-  const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
-  const outcome = applySkillFilesToCache({
+  const outcome = stageSkillFilesForNextConversation({
     sourceSkillDirectory: options.source,
+    stagingDirectory: join(managerDirectory, "pending-cache"),
     installPath,
     skillName: options.skill,
     relativeFiles: options.files ? options.files.split(",") : null,
-    backupDirectory: join(managerDirectory, "backups", options.skill, stamp),
   });
-  return createResult(true, "applied", `${outcome.copiedFiles.length} file(s) applied`, null, outcome);
+  return createResult(true, "staged", `${outcome.stagedFiles.length} file(s) staged for the next conversation`, null, outcome);
 }
 
 function readGitOutput(repositoryPath, args) {
@@ -72,12 +71,24 @@ function decideRelease(options) {
     isRepositoryCheckPassed: options["checks-passed"] === "true",
     isVerificationPassed: options.verified === "true",
     unreleasedCommitHashes: readUnreleasedCommitHashes(repositoryPath),
-    ownCommitHashes: (options["own-commits"] || "").split(",").filter(Boolean),
+    ownCommitHashes: splitList(options["own-commits"]),
     isRemoteDeployEnabled: isRemoteDeployEnabled(repositoryPath),
     deployCountToday: countDeploysOn(managerDirectory, new Date()),
     dailyDeployLimit: config.daily_deploy_limit,
   });
   return createResult(true, decision.action, `release decision: ${decision.action} (${decision.reason})`, null, decision);
+}
+
+// 커밋 전부가 origin/main 에 포함됐는지 조회 (못 읽으면 미포함)
+function checkReleased(options) {
+  const repositoryPath = options.repo || config.repo_path;
+  const ownCommitHashes = splitList(options["own-commits"]);
+  try {
+    for (const hash of ownCommitHashes) readGitOutput(repositoryPath, ["merge-base", "--is-ancestor", hash, "origin/main"]);
+    return createResult(true, ownCommitHashes.length > 0 ? "released" : "not_released", "release check finished");
+  } catch {
+    return createResult(true, "not_released", "commits are not on origin/main");
+  }
 }
 
 // 용어 원문은 출력에 넣지 않음 (대화 기록·이슈 유입 방지)
@@ -92,6 +103,7 @@ const COMMANDS = {
   status: readStatus,
   "apply-cache": applyCache,
   "release-decision": decideRelease,
+  "is-released": checkReleased,
   scan: scanText,
   "queue-add": (options) => {
     const id = enqueueRepair(managerDirectory, JSON.parse(readFileSync(options["request-file"], "utf8")));
@@ -99,7 +111,12 @@ const COMMANDS = {
   },
   "queue-list": () => {
     const pending = listPendingRepairs(managerDirectory);
-    return createResult(true, "ok", `${pending.length} pending`, null, { pending });
+    const awaiting = listAwaitingRepairs(managerDirectory);
+    return createResult(true, "ok", `${pending.length} pending, ${awaiting.length} awaiting`, null, { pending, awaiting });
+  },
+  "queue-await": (options) => {
+    markRepairAwaitingRelease(managerDirectory, options.id, { ownCommitHashes: splitList(options["own-commits"]), issueNumber: options.issue, reason: options.reason });
+    return createResult(true, "awaiting", `awaiting release ${options.id}`);
   },
   "queue-done": (options) => {
     completeRepair(managerDirectory, options.id);
@@ -118,7 +135,7 @@ const COMMANDS = {
   },
 };
 
-const OPTION_NAMES = ["skill", "source", "files", "repo", "own-commits", "checks-passed", "verified", "file", "request-file", "id"];
+const OPTION_NAMES = ["skill", "source", "files", "repo", "own-commits", "checks-passed", "verified", "file", "request-file", "id", "issue", "reason"];
 
 function runCommand(args) {
   const { values, positionals } = parseArgs({

@@ -352,6 +352,23 @@ def cmd_render(a):
                  "next": f"review \"{out}\""})
 
 
+def cmd_render_check(a):
+    """outline > 메모리 렌더 > 자동 점검 (pptx 미저장: DRM 암호화·PowerPoint 실행 없음)"""
+    import io
+    from proposal_lib import outline as ol, review as rv
+    from proposal_lib.deckio import read_pptx_python
+    from proposal_lib.render import render
+    from proposal_lib.setup import load_config
+    cfg, _ = load_config()
+    stream = io.BytesIO()
+    rendered = render(ol.parse_outline(ol.load(expand(a.outline))), cfg, stream)
+    stream.seek(0)
+    deck = read_pptx_python(stream)
+    report = rv.review(deck, cfg, None, None, None, None)
+    return emit({"ok": True, "code": "render_checked", "summary": report["summary"], "slides": rendered["slides"],
+                 "counts": report["counts"], "findings": report["findings"], "deck": deck})
+
+
 def cmd_design_list(a):
     from proposal_lib import designs
     items = designs.list_designs()
@@ -505,6 +522,7 @@ def main():
     p = sp.add_parser("ref-digest"); p.add_argument("id", nargs="*"); p.set_defaults(fn=cmd_ref_digest)
     p = sp.add_parser("version-new"); p.add_argument("project"); p.add_argument("--change", required=True); p.add_argument("--base"); p.set_defaults(fn=cmd_version_new)
     p = sp.add_parser("edit"); p.add_argument("file"); p.add_argument("--json", required=True, help='[{"slide":5,"find":"…","replace":"…"}]'); p.set_defaults(fn=cmd_edit)
+    p = sp.add_parser("render-check"); p.add_argument("outline"); p.set_defaults(fn=cmd_render_check)
     p = sp.add_parser("review"); p.add_argument("file"); p.add_argument("--requirements"); p.add_argument("--client"); p.add_argument("--md"); p.set_defaults(fn=cmd_review)
     a = ap.parse_args()
     missing = need_libs() if a.cmd != "doctor" else []

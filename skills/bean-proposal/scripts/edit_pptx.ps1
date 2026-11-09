@@ -40,5 +40,7 @@ try {
   $p.Save(); $p.Close()
   @{ ok = $true; results = $results } | ConvertTo-Json -Compress -Depth 4
 } finally {
-  $app.Quit(); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app)
+  # 실행 중인 PowerPoint 를 공유하므로 사용자 문서가 열려 있으면 종료 금지
+  if ($app.Presentations.Count -eq 0) { $app.Quit() }
+  [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app)
 }

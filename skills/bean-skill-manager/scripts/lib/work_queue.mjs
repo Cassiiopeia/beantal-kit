@@ -22,13 +22,22 @@ export function enqueueRepair(directory, repairRequest) {
   return id;
 }
 
-export function listPendingRepairs(directory) {
+function listRepairsByStatus(directory, status) {
   const queueDirectory = join(directory, QUEUE_FOLDER_NAME);
   if (!existsSync(queueDirectory)) return [];
   return readdirSync(queueDirectory)
     .sort()
     .map((name) => JSON.parse(readFileSync(join(queueDirectory, name), "utf8")))
-    .filter((repair) => repair.status === "pending");
+    .filter((repair) => repair.status === status);
+}
+
+export const listPendingRepairs = (directory) => listRepairsByStatus(directory, "pending");
+export const listAwaitingRepairs = (directory) => listRepairsByStatus(directory, "awaiting_release");
+
+/** develop 푸시까지 끝난 건 > 다음 대화에서 배포 재판정 */
+export function markRepairAwaitingRelease(directory, id, { ownCommitHashes, issueNumber, reason }) {
+  const path = resolveRepairPath(directory, id);
+  writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), status: "awaiting_release", ownCommitHashes, issueNumber, reason }, null, 2));
 }
 
 export function completeRepair(directory, id) {

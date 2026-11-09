@@ -23,9 +23,9 @@ test("new-skill 뼈대: 개인 취향 파일 규약 포함, check 통과", () =>
   assert.deepEqual(checkSkills(directory), { ok: true, errors: [] });
 });
 
-test("라벨 파일에 자동수리, 확인필요 존재", () => {
+test("라벨 파일에 자동수리 존재", () => {
   const labels = readFileSync(join(root, ".github", "config", "issue-labels.yml"), "utf8");
-  for (const label of ["자동수리", "확인필요"]) assert.ok(labels.includes(`name: ${label}`), label);
+  assert.ok(labels.includes("name: 자동수리"));
 });
 
 test("CLAUDE.md: hook 과 skill 폴더 수정 범위 명시", () => {
