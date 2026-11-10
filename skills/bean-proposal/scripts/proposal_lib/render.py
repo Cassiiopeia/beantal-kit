@@ -10,12 +10,13 @@ import re
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
-from pptx.enum.chart import XL_CHART_TYPE, XL_LEGEND_POSITION
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION, XL_LEGEND_POSITION, XL_MARKER_STYLE
+from pptx.enum.shapes import MSO_CONNECTOR, MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Cm, Pt
 
 from . import fonts as fontcheck
+from .outline import chart_kind, chart_number, org_layout, org_tree
 
 DEFAULT_HEADER = {
     "section_label": {"left": 2.8, "top": 0.0, "width": 15.2, "height": 0.7, "size": 11, "font": "label", "color": "muted"},
@@ -196,6 +197,50 @@ def footer(slide, st):
         _picture(slide, logo, 1.0, H - 1.0, 2.6, 0.6, align="left")
     else:
         _picture(slide, logo, W - 1.0 - 2.6, H - 1.0, 2.6, 0.6, align="right")
+
+
+POINT_LABEL = "POINT"
+POINT_DEFAULT = {"left": 1.2, "height": 1.15, "bottom_gap": 2.45, "size": 11.5, "fill_mix": 0.9}
+
+
+def point_box(st):
+    """POINT 막대의 고정 자리 (left, top, width, height). 모든 본문 장이 같은 자리를 쓴다.
+    기본: 좌우 1.2cm 여백, 높이 1.15cm, 아래 끝이 슬라이드 아래에서 2.45cm (27.5×19.05 → 위 15.45cm).
+    design.point 로 left · top · width · height 를 덮어쓸 수 있다."""
+    W, H = st.size
+    cfg = {**POINT_DEFAULT, **{k: v for k, v in (st.design.get("point") or {}).items() if not str(k).startswith("_")}}
+    left, height = float(cfg["left"]), float(cfg["height"])
+    width = float(cfg.get("width") or (W - 2 * left))
+    top = float(cfg["top"]) if cfg.get("top") is not None else H - float(cfg["bottom_gap"]) - height
+    return left, top, width, height
+
+
+def point_bar(slide, st, value):
+    """장 하단 POINT 막대: 연한 강조색 둥근 상자 한 개 안에 'POINT' 라벨 + 결과 한 문장."""
+    cfg = {**POINT_DEFAULT, **(st.design.get("point") or {})}
+    left, top, width, height = point_box(st)
+    accent = st.colors.get("accent", DEFAULT_COLORS["accent"]).lstrip("#")
+    accent = accent if HEX.fullmatch(accent) else DEFAULT_COLORS["accent"]
+    box = rect(slide, st, left, top, width, height, _mix_white(accent, float(cfg["fill_mix"])), shape=MSO_SHAPE.ROUNDED_RECTANGLE)
+    box.adjustments[0] = 0.18
+    box.name = "POINT"
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.margin_left = tf.margin_right = Cm(0.4)
+    tf.margin_top = tf.margin_bottom = Cm(0.15)
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    body = re.sub(r"^\s*POINT\s*", "", str(value)).strip()
+    size = _fit_size(POINT_LABEL + "  " + body, width - 0.8, height - 0.3, float(cfg["size"]), min_size=9)
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.LEFT
+    for txt, font, color in ((POINT_LABEL, "label", "accent"), ("  " + body, "emphasis", "text")):
+        r = p.add_run()
+        r.text = txt
+        r.font.size = Pt(size)
+        r.font.name = st.font(font)
+        r.font.bold = False
+        r.font.color.rgb = st.color(color)
+    return box
 
 
 def number_position(st):
@@ -543,26 +588,54 @@ def body_timeline(slide, st, rows, periods, left, top, width, height, dry=False)
     return row_h * nrows
 
 
-def body_chart(slide, st, rows, left, top, width, height, dry=False):
+def _style_pie(ch, st, palette):
+    plot = ch.plots[0]
+    plot.has_data_labels = True
+    labels = plot.data_labels
+    labels.show_percentage = True
+    labels.show_value = False
+    labels.show_category_name = False
+    labels.number_format = "0%"
+    labels.number_format_is_linked = False
+    labels.position = XL_LABEL_POSITION.OUTSIDE_END
+    labels.font.size = Pt(11)
+    labels.font.color.rgb = st.color("text")
+    series = ch.series[0]
+    for i in range(len(list(series.values))):
+        point = series.points[i]
+        point.format.fill.solid()
+        point.format.fill.fore_color.rgb = RGBColor.from_string(palette[i % len(palette)])
+        point.format.line.color.rgb = st.color("white")
+    ch.has_legend = True
+    ch.legend.position = XL_LEGEND_POSITION.RIGHT
+    ch.legend.include_in_layout = False
+    ch.legend.font.size = Pt(11)
+    ch.font.name = st.font("body")
+
+
+def body_chart(slide, st, rows, left, top, width, height, dry=False, kind="bar"):
     if not rows or len(rows) < 2:
         return 0
     if dry:
         return height
     head, data = rows[0], rows[1:]
-    cd = CategoryChartData(number_format="#,##0")
+    if kind == "pie":       # 원형은 계열 하나만 뜻이 있다
+        head = head[:2]
+    values = {j: [chart_number(r[j]) if j < len(r) else None for r in data] for j in range(1, len(head))}
+    decimal = any(v is not None and v % 1 for vals in values.values() for v in vals)   # 98.5 를 99 로 반올림해 보이지 않게
+    number_format = "#,##0.0" if decimal else "#,##0"
+    cd = CategoryChartData(number_format=number_format)
     cd.categories = [r[0] for r in data]
     for j, name in enumerate(head[1:], start=1):
-        vals = []
-        for r in data:
-            try:
-                vals.append(float(str(r[j]).replace(",", "")))
-            except (ValueError, IndexError):
-                vals.append(0)
-        cd.add_series(name, vals)
-    gf = slide.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Cm(left), Cm(top), Cm(width), Cm(height), cd)
+        cd.add_series(name, values[j])
+    chart_type = {"bar": XL_CHART_TYPE.COLUMN_CLUSTERED, "line": XL_CHART_TYPE.LINE_MARKERS, "pie": XL_CHART_TYPE.PIE}[kind]
+    gf = slide.shapes.add_chart(chart_type, Cm(left), Cm(top), Cm(width), Cm(height), cd)
     ch = gf.chart
     ch.has_legend = len(head) > 2
-    if len(head) == 2:      # 계열 하나: 제목은 작게, 막대 위에 값 표시
+    palette = [st.colors["primary"], st.colors["accent"], st.colors["muted"], "6B7A99"]
+    if kind == "pie":
+        palette += [_mix_white(st.colors["primary"], 0.45), _mix_white(st.colors["accent"], 0.55)]
+    if len(head) == 2:      # 계열 하나: 제목은 작게, 값 표시
         ch.has_title = True
         ch.chart_title.text_frame.text = head[1]
         tr = ch.chart_title.text_frame.paragraphs[0].runs[0]
@@ -570,12 +643,18 @@ def body_chart(slide, st, rows, left, top, width, height, dry=False):
         tr.font.bold = False
         tr.font.name = st.font("emphasis")
         tr.font.color.rgb = st.color("text")
-        plot = ch.plots[0]
-        plot.has_data_labels = True
-        plot.data_labels.number_format = "#,##0"
-        plot.data_labels.number_format_is_linked = False
-        plot.data_labels.font.size = Pt(10)
-        plot.data_labels.font.color.rgb = st.color("text")
+        if kind != "pie":
+            plot = ch.plots[0]
+            plot.has_data_labels = True
+            plot.data_labels.number_format = number_format
+            plot.data_labels.number_format_is_linked = False
+            plot.data_labels.font.size = Pt(10)
+            plot.data_labels.font.color.rgb = st.color("text")
+            if kind == "line":
+                plot.data_labels.position = XL_LABEL_POSITION.ABOVE
+    if kind == "pie":
+        _style_pie(ch, st, palette)
+        return height
     if ch.has_legend:
         ch.legend.position = XL_LEGEND_POSITION.TOP
         ch.legend.include_in_layout = False
@@ -584,18 +663,101 @@ def body_chart(slide, st, rows, left, top, width, height, dry=False):
     va.has_major_gridlines = True
     va.major_gridlines.format.line.color.rgb = RGBColor.from_string(GRID)
     va.format.line.fill.background()
-    va.tick_labels.number_format = "#,##0"
+    va.tick_labels.number_format = number_format
     va.tick_labels.number_format_is_linked = False
     va.tick_labels.font.size = Pt(10)
     ch.category_axis.tick_labels.font.size = Pt(11)
     ch.category_axis.format.line.color.rgb = RGBColor.from_string(GRID)
-    palette = [st.colors["primary"], st.colors["accent"], st.colors["muted"], "6B7A99"]
     for i, s in enumerate(ch.series):
-        s.format.fill.solid()
-        s.format.fill.fore_color.rgb = RGBColor.from_string(palette[i % len(palette)])
-    ch.plots[0].gap_width = 60
+        rgb = RGBColor.from_string(palette[i % len(palette)])
+        if kind == "line":
+            s.smooth = False
+            s.format.line.color.rgb = rgb
+            s.format.line.width = Pt(2.25)
+            s.marker.style = XL_MARKER_STYLE.CIRCLE
+            s.marker.size = 7
+            s.marker.format.fill.solid()
+            s.marker.format.fill.fore_color.rgb = rgb
+            s.marker.format.line.color.rgb = rgb
+        else:
+            s.format.fill.solid()
+            s.format.fill.fore_color.rgb = rgb
+    if kind == "bar":
+        ch.plots[0].gap_width = 60
     ch.font.name = st.font("body")
     return height
+
+
+def _org_line(slide, st, x1, y1, x2, y2):
+    line = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Cm(x1), Cm(y1), Cm(x2), Cm(y2))
+    line.line.color.rgb = st.color("muted")
+    line.line.width = Pt(1)
+    line.element.xpath(".//a:effectRef")[0].set("idx", "0")     # 테마 기본 그림자를 끈다
+
+
+def _org_box(slide, st, node, left, top, width, height):
+    """최상위는 primary, 둘째 줄은 accent, 그 아래는 옅은 칸. 빈칸 표시가 묻히지 않게 [확인 필요]는 옅은 칸에 그린다."""
+    name, desc = node["name"], node["desc"]
+    pending = CHECK.search(name) or CHECK.search(desc)
+    dark = node["level"] < 2 and not pending
+    box = rect(slide, st, left, top, width, height,
+               ("primary" if node["level"] == 0 else "accent") if dark else LIGHT_FILL, line=None if dark else GRID)
+    tf = box.text_frame
+    tf.word_wrap = True
+    tf.margin_left = tf.margin_right = Cm(0.08)
+    tf.margin_top = tf.margin_bottom = Cm(0.03)
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    room = width - 0.2
+    lines = [(name, _fit_size(name, room, height * (0.5 if desc else 0.9), 12), "emphasis", True)]
+    if desc:
+        lines.append((desc, _fit_size(desc, room, height * 0.45, 10, min_size=8), "body", False))
+    for i, (value, size, font, bold) in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.alignment = PP_ALIGN.CENTER
+        r = p.add_run()
+        r.text = value
+        r.font.size = Pt(size)
+        r.font.name = st.font(font)
+        r.font.bold = bold
+        r.font.color.rgb = st.color("accent") if CHECK.search(value) else st.color("white" if dark else "text")
+
+
+def body_org(slide, st, items, left, top, width, height, dry=False):
+    """조직도: 위에서 아래로 뻗는 트리. 팀원이 많으면 말단은 부모 아래 세로로 쌓는다."""
+    org = org_layout(org_tree(items))
+    if not org["nodes"]:
+        return 0
+    gap = 0.6
+    box_h = min(1.8, (height - gap * (org["rows"] - 1)) / org["rows"])
+    used = org["rows"] * box_h + gap * (org["rows"] - 1)
+    if dry:
+        return used
+    cw = width / org["cols"]
+    box_w = min(5.6, cw - 0.35)
+    center = lambda n: left + n["x"] * cw
+    y_of = lambda n: top + n["row"] * (box_h + gap)
+    for n in org["nodes"]:      # 선을 먼저 그려 상자가 위에 오게 한다
+        kids, bottom = n["kids"], y_of(n) + box_h
+        if not kids:
+            continue
+        if n.get("stack"):
+            rail = center(n) - box_w / 2 + 0.25
+            _org_line(slide, st, rail, bottom, rail, y_of(kids[-1]) + box_h / 2)
+            for k in kids:
+                _org_line(slide, st, rail, y_of(k) + box_h / 2, rail + 0.45, y_of(k) + box_h / 2)
+            continue
+        mid = bottom + gap / 2
+        _org_line(slide, st, center(n), bottom, center(n), mid)
+        if len(kids) > 1:
+            _org_line(slide, st, center(kids[0]), mid, center(kids[-1]), mid)
+        for k in kids:
+            _org_line(slide, st, center(k), mid, center(k), y_of(k))
+    for n in org["nodes"]:
+        x, w = center(n) - box_w / 2, box_w
+        if n.get("hang"):
+            x, w = x + 0.7, w - 0.7
+        _org_box(slide, st, n, x, y_of(n), w, box_h)
+    return used
 
 
 # ---------------------------------------------------------------- 유형별 슬라이드
@@ -730,7 +892,7 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
         else:
             num, name = _section_parts(s.get("섹션"))
             header(slide, st, num, name, s.get("제목"), s.get("메시지"), client_mark)
-            parts = [k for k in ("본문", "표", "단계", "데이터", "일정") if s.get(k)]
+            parts = [k for k in ("본문", "표", "단계", "데이터", "조직", "일정") if s.get(k)]
             if t[0] == "L" and not parts:
                 text(slide, st, body_left, body_top + 2, body_w, 2, "[확인 필요: 회사 소개 라이브러리 장표 삽입 — library.json company-intro]", size=14)
             if t == "C01":
@@ -740,11 +902,18 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
             else:
                 body_fn = body_groups
             periods = [p.strip() for p in re.split(r"[,，]", s.get("기간", "")) if p.strip()]
-            draw = {"본문": body_fn, "표": body_table, "단계": body_steps, "데이터": body_chart,
+            kind = chart_kind(s.get("차트")) or "bar"
+            draw = {"본문": body_fn, "표": body_table, "단계": body_steps, "조직": body_org,
+                    "데이터": lambda *a, **k: body_chart(*a, kind=kind, **k),
                     "일정": lambda sl, st_, rows, *a, **k: body_timeline(sl, st_, rows, periods, *a, **k)}
 
+            point = "" if t == "C13" else (s.get("포인트") or s.get("POINT") or "").strip()   # 조직도는 구조가 곧 메시지라 POINT 를 두지 않는다
+            slide_body_h = body_h
+            if point:     # 본문은 POINT 막대 위 0.4cm 에서 끝난다
+                slide_body_h = min(body_h, point_box(st)[1] - 0.4 - body_top)
+
             def layout(dry, y0):
-                y, remain = y0, body_h - 0.2
+                y, remain = y0, slide_body_h - 0.2
                 for i, k in enumerate(parts):
                     last = i == len(parts) - 1
                     avail = remain if last else remain * (0.45 if k == "본문" else 0.55)
@@ -753,8 +922,10 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
                     remain -= used + 0.5
                 return y - y0 - 0.5
             total = layout(True, 0)
-            free = max(0.0, body_h - 0.2 - total)
+            free = max(0.0, slide_body_h - 0.2 - total)
             layout(False, body_top + 0.2 + free * 0.3)   # 남는 공간은 위 30% · 아래 70% 로 나눈다
+            if point:
+                point_bar(slide, st, point)
         if t not in ("T01", "T03"):
             page_number(slide, st, len(prs.slides))
         if t not in ("T01", "T02", "T03", "T04"):

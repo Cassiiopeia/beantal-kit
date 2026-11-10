@@ -133,6 +133,10 @@ PYTHON=$(command -v python3 || command -v python)
   - 저장: 사용자가 "이 디자인 저장해줘"라고 하면 `profile` 실측값과 화면 확인 결과로 `design-save --name <이름> --json '{…}'` (칸: description, source, color_policy, fonts, colors, header, design).
   - `design` 칸: `card: band`(둥근 색 띠 소제목 + 테두리 박스, `▶ ` 로 시작하는 항목은 카드 맨 아래 결론 상자), `divider: light`(흰 간지), `cover: panel`, `toc: list`, `rule: <cm>`(헤더 아래 가로줄), `footer_logo: <이미지 경로>`, `footer_logo_align: right`(기본, 쪽 번호는 왼쪽) · `left`.
   - 고객사 로고는 프로젝트 `00_입력/` 에, 회사 로고는 `~/.beantal-kit/shared/company/` 에 둔다 (레포에 넣지 않는다).
+- **시각 자료 우선**: S5 에서 장 유형을 고르기 전에 그 장의 표현부터 정한다(`references/page-types.md` 3-1절). 순서·공정은 흐름도(`단계:`), 수치는 차트(`데이터:` + `차트: 막대|선형|원형`), 조직은 C13(`조직:`), 일정은 C12 로 그리고, 표는 칸마다 정확히 대조할 내용에만 쓴다. 표만 있는 장이 본문의 절반을 넘거나 3장 이상 이어지면 `outline-check` 가 O17 로 경고한다. 차트 숫자는 지어내지 않는다.
+- **POINT 막대**: 본문 장 하단의 한 줄 요약 상자. outline 에 `- 포인트: …` 로 쓰면 렌더러가 **모든 장 같은 자리**(27.5×19.05 기준 위 15.45cm · 좌 1.2cm · 폭 = 슬라이드 폭 − 2.4cm · 높이 1.15cm)에 그리고, 본문은 그 위 0.4cm 에서 끝낸다. 자리는 디자인 `design.point`(`top` · `left` · `width` · `height`)로만 바꾼다. 장마다 다른 자리에 손으로 그리지 않는다. 운영조직(C13, 조직도) 장에는 POINT 를 두지 않는다 — 써도 렌더할 때 빠지고 `outline-check` 가 O16 으로 알린다.
+  - 문구 규칙(`references/tone.md` 6절): 화주사가 **얻는 결과** 한 문장(55자 이하). 우리가 하는 작업 과정("빈에 담고 바코드를 붙입니다")은 본문에 이미 있으니 쓰지 않는다. `A → B` 형태도 쓰지 않는다 — 화살표 앞이 과정 설명이 되기 쉽다. 결과만 남긴다. `outline-check` 가 O16 으로 경고한다.
+  - 기존 덱: `point <vNN.pptx> --check` 로 자리 다른 장 · 본문과 겹치는 장 · 문구 점검 장을 본다. 맞출 때는 `version-new` 로 새 번호를 만든 뒤 `point <새 vNN.pptx>` 로 모든 POINT 를 같은 자리 · 같은 글자 크기 · 같은 라벨 색으로 옮긴다 (DRM 덱은 PowerPoint 경유, 열려 있는 다른 PowerPoint 창은 닫지 않는다). 본문과 겹친다고 나온 장은 자동으로 줄이지 않으니, 사용자에게 장 번호를 알려 본문을 POINT 위로 올리게 한 뒤 `snapshot` 으로 확인한다.
 - 렌더러로 레이아웃을 바꾼 버전은 `version-new` 대신 `render --project` 로 다음 번호를 만든다. 이때 직전 버전에 PowerPoint 직접 수정이 없었는지(outline.md 저장 시각과 pptx 시각) 먼저 확인한다.
 - v02 이후 수정: `version-new <프로젝트> --change "5장 SLA 수치 수정"` 로 복사한 뒤 `edit <새 vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'` 로 글자를 바꾼다 (slide 0 = 전체 장). DRM 덱도 PowerPoint 경유로 고친다. 최신 버전이 아닌 파일은 `edit` 이 거절한다. 장 추가·삭제·배치 변경처럼 글자 교체로 안 되는 수정은 사용자와 함께 PowerPoint 에서 하고 다음 번호로 저장하게 한다.
 - 변경 이력은 `project.json` 의 `versions` 에 쌓인다 (버전, 날짜, 기준 파일, 바꾼 이유). 새 대화에서 이어 작업할 때는 `status <프로젝트>` 와 이 이력을 먼저 읽는다.
@@ -171,7 +175,7 @@ AskUserQuestion 으로 묻는다 (추천을 첫 번째에):
 | 문서 | 내용 | 읽는 때 |
 |---|---|---|
 | `references/tone.md` | 말투 규칙 (메시지 · 본문 · 기호 · 용어) | S5 메시지를 쓰기 전 |
-| `references/page-types.md` | 덱 뼈대, 페이지 유형 17종, outline.md 문법 | S5 |
+| `references/page-types.md` | 덱 뼈대, 페이지 유형 18종, 표현 고르기, outline.md 문법 | S5 |
 | `references/artifacts.md` | 폴더 · requirements · strategy · checklist · project.json 규격 | S1~S8 |
 | `references/review-rules.md` | 점검 코드, 6축 채점, 보고 형식 | S7, 비판 모드 |
 

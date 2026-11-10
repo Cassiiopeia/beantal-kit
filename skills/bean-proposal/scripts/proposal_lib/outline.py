@@ -27,10 +27,15 @@ outline.md 형식 (슬라이드 한 장 = '## ' 블록):
     - 데이터:
       | 월 | 택배 | 우편 |
       | 1월 | 1200 | 800 |
+    - 차트: 막대 | 선형 | 원형                 ('데이터:' 를 그릴 모양, 생략하면 막대)
+    - 조직:                                   (들여쓰기가 곧 상하 관계, C13 운영조직)
+      - 총괄 PM | 계약·보고
+        - 운영팀 | 입출고; 재고
     - 기간: 10월 4W, 11월 1W, 11월 2W        (C12 타임테이블의 열)
     - 일정:
       | 항목 | 세부 일정 | 시작 | 끝 | 표시 |
       | 계약 | 계약 체결 | 10월 4W | 10월 4W | |
+    - 포인트: 유사 SKU 오출고를 막습니다      (장 하단 POINT 막대, 모든 장 같은 자리 · 결과만)
     - 상태: 초안
 """
 import re
@@ -42,11 +47,15 @@ TYPES = {
     "T01": "표지", "T02": "목차", "T03": "간지", "T04": "마무리",
     "C01": "제안 방향", "C02": "요건 대응 총괄", "C03": "요건 대응표", "C04": "프로세스/흐름",
     "C05": "현황 분석(차트)", "C06": "거점/센터", "C07": "비교안", "C08": "일정",
-    "C09": "사례/실적", "C10": "보안·증빙", "C11": "정산·단가", "C12": "타임테이블",
+    "C09": "사례/실적", "C10": "보안·증빙", "C11": "정산·단가", "C12": "타임테이블", "C13": "운영조직",
     "L01": "회사 소개", "L02": "회사 소개", "L03": "회사 소개", "L04": "회사 소개", "L05": "회사 소개", "L06": "회사 소개",
 }
 LIST_FIELDS = {"본문", "단계"}
 TABLE_FIELDS = {"표", "데이터", "일정"}
+TREE_FIELDS = {"조직"}
+CHART_KINDS = {"": "bar", "막대": "bar", "세로막대": "bar", "bar": "bar", "column": "bar",
+               "선형": "line", "꺾은선": "line", "line": "line",
+               "원형": "pie", "파이": "pie", "pie": "pie"}
 NEEDS_HEADER = {k for k in TYPES if k[0] in "CL"}
 REQUIRED_KINDS = ("작성요청", "평가", "SLA", "업무범위")
 
@@ -75,6 +84,8 @@ def parse_outline(text):
             elif field in LIST_FIELDS:
                 items = [re.sub(r"^\s*-\s*", "", b).rstrip() for b in buf if b.strip().startswith("-")]
                 cur[field] = items
+            elif field in TREE_FIELDS:      # 들여쓰기로 상하 관계를 읽으므로 앞 공백을 남긴다
+                cur[field] = [b.rstrip() for b in buf if b.strip().startswith("-")]
         field, buf = None, []
 
     for raw in text.splitlines():
@@ -99,7 +110,7 @@ def parse_outline(text):
             if fm:
                 key, val = fm.group(1).strip(), fm.group(2).strip()
                 target = meta if cur is None else cur
-                if key in LIST_FIELDS | TABLE_FIELDS and not val:
+                if key in LIST_FIELDS | TABLE_FIELDS | TREE_FIELDS and not val:
                     field = key
                 else:
                     target[key] = val
@@ -150,6 +161,118 @@ def check_timeline(s, where):
     return f
 
 
+def chart_kind(name):
+    """'차트:' 값 → bar/line/pie. 생략은 bar, 모르는 값은 None."""
+    return CHART_KINDS.get((name or "").strip().lower())
+
+
+def chart_number(value):
+    """차트 칸 값 → 숫자. 읽을 수 없는 칸([확인 필요] 등)은 0 으로 꾸미지 않고 None."""
+    try:
+        return float(str(value).replace(",", "").replace("%", ""))
+    except ValueError:
+        return None
+
+
+def org_tree(lines):
+    """'조직:' 줄들 → 노드 트리. 더 깊게 들여쓴 줄이 바로 위 줄의 하위 조직이다."""
+    roots, stack = [], []
+    for ln in lines:
+        indent = len(ln) - len(ln.lstrip())
+        name, _, desc = re.sub(r"^\s*-\s*", "", ln).partition("|")
+        node = {"name": name.strip(), "desc": " · ".join(d.strip() for d in desc.split(";") if d.strip()), "kids": []}
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        (stack[-1][1]["kids"] if stack else roots).append(node)
+        stack.append((indent, node))
+    return roots
+
+
+def org_layout(roots, max_cols=7):
+    """노드에 격자 위치(x 열 중심, row 줄, level 깊이)를 매기고 열·줄 수를 돌려준다.
+
+    옆으로 max_cols 열을 넘으면 말단 팀원을 부모 아래 세로로 쌓는다 (최상위 바로 아래는 제외).
+    """
+    def walk(nodes):
+        for n in nodes:
+            yield n
+            yield from walk(n["kids"])
+
+    def width(n):
+        return sum(width(k) for k in n["kids"]) if n["kids"] and not n.get("stack") else 1
+
+    if sum(width(n) for n in roots) > max_cols:
+        for root in roots:
+            for n in walk(root["kids"]):
+                n["stack"] = bool(n["kids"]) and not any(k["kids"] for k in n["kids"])
+
+    def place(n, col, row, level):
+        n["row"], n["level"] = row, level
+        if n["kids"] and n.get("stack"):
+            n["x"] = col + 0.5
+            for i, k in enumerate(n["kids"]):
+                k.update(x=n["x"], row=row + i + 1, level=level + 1, hang=True)
+            return col + 1
+        if not n["kids"]:
+            n["x"] = col + 0.5
+            return col + 1
+        for k in n["kids"]:
+            col = place(k, col, row + 1, level + 1)
+        n["x"] = (n["kids"][0]["x"] + n["kids"][-1]["x"]) / 2
+        return col
+
+    cols = 0
+    for n in roots:
+        cols = place(n, cols, 0, 0)
+    nodes = list(walk(roots))
+    return {"roots": roots, "nodes": nodes, "cols": cols, "rows": max((n["row"] for n in nodes), default=-1) + 1}
+
+
+def check_visual_fields(s, where):
+    """O18 차트 종류·원형 데이터, O19 조직도 입력·크기."""
+    f = []
+    warn = lambda code, msg: f.append({"sev": "warn", "slide": where, "code": code, "msg": msg})
+    rows = s.get("데이터") or []
+    if s.get("차트"):
+        kind = chart_kind(s["차트"])
+        if not rows:
+            warn("O18", "'차트:' 는 있는데 '데이터:' 가 없습니다")
+        elif kind is None:
+            warn("O18", f"차트 종류 '{s['차트']}' 를 모릅니다 — 막대 · 선형 · 원형 중 하나로 쓰세요 (지금은 막대로 그립니다)")
+        elif kind == "pie":
+            if len(rows[0]) > 2:
+                warn("O18", "원형 차트는 첫 계열만 그립니다 — 계열이 여럿이면 막대나 선형으로 바꾸세요")
+            if len(rows) - 1 > 6:
+                warn("O18", f"원형 조각이 {len(rows) - 1}개입니다 — 6개 이하로 묶으세요")
+            if any((chart_number(r[1]) or 0) < 0 for r in rows[1:] if len(r) > 1):
+                warn("O18", "원형 차트에 음수가 있습니다 — 막대로 바꾸세요")
+    if s["type"] == "C13" and not s.get("조직"):
+        warn("O19", "운영조직 유형인데 '조직:' 이 없습니다")
+    if s.get("조직"):
+        size = org_layout(org_tree(s["조직"]))
+        if size["cols"] > 8 or size["rows"] > 5:
+            warn("O19", f"조직도가 {size['cols']}열 {size['rows']}줄이라 글자가 작아집니다 — 8열 5줄 이내로 묶거나 두 장으로 나누세요")
+    return f
+
+
+def check_visual_mix(slides):
+    """O17: 표만 있는 장이 본문의 절반을 넘거나 3장 이상 이어지면 경고한다."""
+    body = [s for s in slides if (s.get("type") or "").startswith("C")]
+    flags = [bool(s.get("표")) and not any(s.get(k) for k in ("단계", "데이터", "일정", "조직")) for s in body]
+    f = []
+    if len(body) >= 6 and sum(flags) * 2 > len(body):
+        f.append({"sev": "warn", "slide": None, "code": "O17", "msg": f"본문 {len(body)}장 중 {sum(flags)}장이 표만 있습니다 — 흐름도('단계:')·차트('데이터:')·타임테이블(C12)로 바꿀 장을 찾으세요"})
+    run = 0
+    for i, flag in enumerate(flags + [False]):
+        if flag:
+            run += 1
+            continue
+        if run >= 3:
+            f.append({"sev": "warn", "slide": body[i - run].get("n"), "code": "O17", "msg": f"표만 있는 장이 {run}장 이어집니다 — 앞에 흐름도나 차트 장을 넣으세요"})
+        run = 0
+    return f
+
+
 def check_outline(parsed, reqs=None, tone_check=None):
     """형식·추적성 검사. 반환: findings 목록."""
     f = []
@@ -180,15 +303,24 @@ def check_outline(parsed, reqs=None, tone_check=None):
             f.append({"sev": "warn", "slide": where, "code": "O08", "msg": "차트 유형인데 '데이터:' 가 없습니다"})
         if s["type"] == "C12":
             f += check_timeline(s, where)
+        f += check_visual_fields(s, where)
         if tone_check and s.get("메시지") and s["type"][0] == "C":
             for issue in tone_check(s["메시지"]):
                 f.append({"sev": "warn", "slide": where, "code": "O09", "msg": issue})
+        point = s.get("포인트") or s.get("POINT")
+        if point and s["type"] == "C13":
+            f.append({"sev": "warn", "slide": where, "code": "O16", "msg": "운영조직(조직도) 장에는 POINT 를 두지 않습니다 — 렌더할 때 빠집니다"})
+        elif point and s["type"][0] == "C":
+            from .tone import check_point
+            for issue in check_point(point):
+                f.append({"sev": "warn", "slide": where, "code": "O16", "msg": issue})
         blob = " ".join(str(v) for v in s.values())
         if "[확인 필요" in blob:
             f.append({"sev": "info", "slide": where, "code": "O10", "msg": "[확인 필요] 빈칸이 있습니다 — 제출 전 채워야 합니다"})
     nums = [s["n"] for s in slides if s.get("n")]
     if nums and nums != sorted(nums):
         f.append({"sev": "warn", "slide": None, "code": "O11", "msg": "슬라이드 번호가 순서대로가 아닙니다"})
+    f += check_visual_mix(slides)
     coverage = None
     if reqs is not None:
         linked = {}

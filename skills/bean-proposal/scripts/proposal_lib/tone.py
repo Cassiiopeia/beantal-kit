@@ -25,6 +25,25 @@ def check_message(msg):
     return issues
 
 
+# POINT 막대: 화주사가 얻는 결과 한 문장. 우리가 하는 작업(과정)은 본문에 이미 있으니 되풀이하지 않는다.
+POINT_MAX = 55                     # 11.5pt · 폭 25cm 막대 한 줄
+POINT_ARROW = re.compile(r"→|->|⇒|▶")
+# 작업 동작을 설명하는 말 (빈에 담고, 바코드를 붙이고, 스캔해 …) — 화주사 입장에선 당연한 과정이다
+POINT_PROCESS = re.compile(r"(담[고아]|담습니다|붙[이여]|붙입니다|부착|스캔|찍[고어]|적치|적재해|보관하고|분류해|입력해|옮겨|처리해|피킹하고|검수하고|포장하고)")
+
+
+def check_point(text):
+    issues = []
+    t = re.sub(r"^\s*POINT\s*", "", text.strip())
+    if POINT_ARROW.search(t):
+        issues.append("POINT 에 화살표가 있습니다 — 화살표 앞(우리 작업 과정)은 빼고 화주사가 얻는 결과만 쓰세요")
+    if POINT_PROCESS.search(t):
+        issues.append(f"POINT 가 작업 과정을 설명합니다('{POINT_PROCESS.search(t).group(0)}') — 줄어드는 것·빨라지는 것·막아지는 것 등 결과로 바꾸세요")
+    if len(t) > POINT_MAX:
+        issues.append(f"POINT 가 깁니다({len(t)}자) — 한 줄 {POINT_MAX}자 이하 결과 한 문장으로")
+    return issues
+
+
 def check_bullet(text):
     issues = []
     t = text.strip()

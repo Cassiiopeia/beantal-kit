@@ -326,25 +326,31 @@ def cmd_outline_renumber(a):
     return emit({"ok": True, "code": "renumbered", "summary": f"{n}장 · 번호 변경 {len(changes)}건", "changes": changes, "next": "outline-check"})
 
 
-def cmd_render(a):
+def _render_outline(a, out):
+    """outline 을 out(pptx) 으로 렌더한다. 디자인 프리셋이 없으면 FileNotFoundError."""
     from proposal_lib import outline as ol
     from proposal_lib.render import render
     from proposal_lib.setup import load_config
     cfg, _ = load_config()
     if a.design or a.color:
         from proposal_lib import designs
-        try:
-            preset = designs.load_design(a.design) if a.design else {}
-        except FileNotFoundError as e:
-            return emit({"ok": False, "code": "design_missing", "summary": str(e), "next": "design-list"})
+        preset = designs.load_design(a.design) if a.design else {}
         cfg = designs.apply_design(cfg, preset, designs.parse_colors(a.color))
     parsed = ol.parse_outline(ol.load(expand(a.outline)))
-    out = expand(a.out)
+    out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     logo = str(expand(a.client_logo)) if a.client_logo else None
     cover = str(expand(a.cover_image)) if a.cover_image else None
     fright = str(expand(a.footer_client_logo)) if a.footer_client_logo else None
-    r = render(parsed, cfg, str(out), client_mark=a.client_mark, client_logo=logo, cover_image=cover, footer_right=fright)
+    return render(parsed, cfg, str(out), client_mark=a.client_mark, client_logo=logo, cover_image=cover, footer_right=fright)
+
+
+def cmd_render(a):
+    out = expand(a.out)
+    try:
+        r = _render_outline(a, out)
+    except FileNotFoundError as e:
+        return emit({"ok": False, "code": "design_missing", "summary": str(e), "next": "design-list"})
     if a.project:
         from proposal_lib.project import record_version
         record_version(expand(a.project), out.relative_to(expand(a.project)) if str(out).startswith(str(expand(a.project))) else out, a.change or "render")
@@ -419,6 +425,227 @@ def cmd_version_new(a):
     if r["ok"]:
         r["next"] = "edit \"%s\" --json '[{\"slide\": 5, \"find\": \"…\", \"replace\": \"…\"}]' 로 이 복사본만 고친다" % r["path"]
     return emit(r)
+
+
+def _point_python(f, check, box):
+    """python-pptx 경로 (macOS · DRM 아닌 파일). point_pptx.ps1 과 같은 규칙."""
+    import re as _re
+    from pptx import Presentation
+    from pptx.util import Cm, Pt
+    prs = Presentation(str(f))
+    W, H = prs.slide_width / 360000, prs.slide_height / 360000
+    left, height = box["left"], box["height"]
+    width = box.get("width") or round(W - 2 * left, 2)
+    top = box["top"] if box.get("top") is not None else round(H - box["bottom_gap"] - height, 2)
+
+    def walk(shapes):
+        for sh in shapes:
+            if sh.shape_type == 6:
+                yield from walk(sh.shapes)
+            else:
+                yield sh
+    rows = []
+    for i, s in enumerate(prs.slides, 1):
+        pts, others = [], []
+        for sh in walk(s.shapes):
+            txt = sh.text_frame.text if sh.has_text_frame else ""
+            is_pt = _re.match(r"(?i)^point", sh.name or "") or (sh.top / 360000 > H / 2 and _re.match(r"^\s*POINT\b", txt))
+            (pts if is_pt else others).append(sh)
+        if not pts:
+            continue
+        bar = pts[0]
+        was = {k: round(getattr(bar, k) / 360000, 2) for k in ("left", "top", "width", "height")}
+        if not check:
+            bar.left, bar.top, bar.width, bar.height = Cm(left), Cm(top), Cm(width), Cm(height)
+            for para in bar.text_frame.paragraphs:
+                for r in para.runs:
+                    r.font.size = Pt(box["size"])
+        hits = []
+        for o in others:
+            ot, ob = o.top / 360000, (o.top + o.height) / 360000
+            if ot < H - 1.4 and ob > top - 0.1 and ot < top + height:
+                hits.append(f"{o.name} ({ot:.2f}~{ob:.2f}cm)")
+        target = {"left": left, "top": top, "width": width, "height": height}
+        rows.append({"slide": i, "was": was, "moved": not check and any(abs(was[k] - target[k]) > 0.05 for k in target),
+                     "extra_points": len(pts) - 1, "overlaps": hits, "text": " ".join(bar.text_frame.text.split())})
+    if not check:
+        prs.save(str(f))
+    return {"ok": True, "box": {"left": left, "top": top, "width": width, "height": height}, "points": rows}
+
+
+def cmd_point(a):
+    """모든 장의 POINT 막대를 같은 자리·크기로 맞춘다 (--check 는 읽기만). 최신 버전 파일에만 쓴다."""
+    import subprocess
+    from proposal_lib.project import latest_deck
+    from proposal_lib.render import POINT_DEFAULT
+    from proposal_lib.tone import check_point
+    f = expand(a.file)
+    if not a.check:
+        last = latest_deck(f.parent.parent) if f.parent.name == "04_제작" else None
+        if last and last.resolve() != f.resolve():
+            return emit({"ok": False, "code": "not_latest", "summary": f"최신 버전이 아닙니다 ({last.name}). version-new 로 새 버전을 만든 뒤 맞추세요."})
+    box = {**POINT_DEFAULT, "top": a.top, "width": a.width}
+    if platform.system() == "Windows":
+        ps1 = Path(__file__).resolve().parent / "point_pptx.ps1"
+        args = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ps1), "-Path", str(f),
+                "-Left", str(box["left"]), "-Height", str(box["height"]), "-BottomGap", str(box["bottom_gap"]), "-Size", str(box["size"])]
+        if a.top is not None:
+            args += ["-Top", str(a.top)]
+        if a.width is not None:
+            args += ["-Width", str(a.width)]
+        if a.check:
+            args.append("-Check")
+        r = subprocess.run(args, capture_output=True, text=True, encoding="utf-8")
+        try:
+            out = json.loads(r.stdout.strip().splitlines()[-1])
+        except Exception:
+            return emit({"ok": False, "code": "point_failed", "summary": (r.stderr or r.stdout)[:400]})
+    else:
+        out = _point_python(f, a.check, box)
+    pts = out.get("points") or []
+    if isinstance(pts, dict):
+        pts = [pts]
+    for p in pts:
+        p["wording"] = check_point(p.get("text", ""))
+        if isinstance(p.get("overlaps"), str):
+            p["overlaps"] = [p["overlaps"]]
+    b = out["box"]
+    moved = [p["slide"] for p in pts if p.get("moved")]
+    off = [p["slide"] for p in pts if any(abs(p["was"][k] - b[k]) > 0.05 for k in ("left", "top", "width", "height"))]
+    overl = [p["slide"] for p in pts if p.get("overlaps")]
+    words = [p["slide"] for p in pts if p["wording"]]
+    head = f"POINT {len(pts)}장 · 기준 위 {b['top']}cm 높이 {b['height']}cm"
+    head += f" · 자리 다른 장 {off}" if a.check else f" · 옮긴 장 {moved}"
+    if overl:
+        head += f" · 본문과 겹치는 장 {overl}"
+    if words:
+        head += f" · 문구 점검 필요 {words}"
+    return emit({"ok": True, "code": "point_checked" if a.check else "point_aligned", "summary": head, "box": b, "points": pts,
+                 "next": "겹치는 장은 본문을 POINT 위로 올리고, 문구 점검 장은 결과 한 문장으로 고친 뒤 snapshot 으로 확인"})
+
+
+def _html_dir(src, out):
+    if out:
+        return expand(out)
+    src = Path(src)
+    return src.parent / "html" / src.stem if src.parent.name == "04_제작" else src.parent / f"{src.stem}_html"
+
+
+def _html_dirty(d):
+    deck, base = d / "deck.html", d / ".baseline.html"
+    return deck.exists() and base.exists() and deck.read_bytes() != base.read_bytes()
+
+
+def cmd_html_open(a):
+    """기존 pptx(DRM 포함)를 HTML 작업본으로 바꾼다."""
+    from proposal_lib import htmldeck
+    src = expand(a.file)
+    d = _html_dir(src, a.out)
+    if _html_dirty(d) and not a.force:
+        return emit({"ok": False, "code": "unsaved_edits", "summary": f"{d} 에 PPT 로 아직 옮기지 않은 수정이 있습니다. html-build 로 먼저 저장하거나 --force 로 덮어씁니다."})
+    r = htmldeck.open_pptx(src, d)
+    return emit({"ok": True, "code": "html_opened", "summary": f"{r['slides']}장 → {d / 'deck.html'}", "dir": str(d), **r,
+                 "next": f"html-preview \"{d}\" 로 띄우고 deck.html 을 고친 뒤 html-build \"{d}\""})
+
+
+def cmd_html_new(a):
+    """outline 을 렌더해 바로 HTML 작업본으로 만든다 (PPT 버전은 html-build 때 생긴다)."""
+    import tempfile
+    from proposal_lib import htmldeck
+    d = expand(a.out)
+    if _html_dirty(d) and not a.force:
+        return emit({"ok": False, "code": "unsaved_edits", "summary": f"{d} 에 PPT 로 아직 옮기지 않은 수정이 있습니다. --force 로 덮어씁니다."})
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td) / "render.pptx"
+        try:
+            _render_outline(a, tmp)
+        except FileNotFoundError as e:
+            return emit({"ok": False, "code": "design_missing", "summary": str(e), "next": "design-list"})
+        r = htmldeck.from_outline(tmp, d)
+    return emit({"ok": True, "code": "html_created", "summary": f"{r['slides']}장 → {d / 'deck.html'}", "dir": str(d), **r,
+                 "next": f"html-preview \"{d}\""})
+
+
+def _preview_alive(port):
+    import urllib.request
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/__version", timeout=1).read()
+        return True
+    except Exception:
+        return False
+
+
+def cmd_html_preview(a):
+    """작업 폴더를 이 PC 안에서만 열리는 주소로 띄운다. deck.html 이 바뀌면 화면이 1초 안에 새로고침된다."""
+    import socket
+    import time
+    import webbrowser
+    d = expand(a.dir)
+    state = d / ".preview.json"
+    info = json.loads(state.read_text(encoding="utf-8")) if state.exists() else None
+    if a.stop:
+        if info:
+            try:
+                os.kill(info["pid"], 15)
+            except OSError:
+                pass
+            state.unlink()
+        return emit({"ok": True, "code": "preview_stopped", "summary": "미리보기를 껐습니다." if info else "켜진 미리보기가 없습니다."})
+    if not (d / "deck.html").exists():
+        return emit({"ok": False, "code": "no_deck", "summary": f"{d} 에 deck.html 이 없습니다. html-open 또는 html-new 를 먼저 실행합니다."})
+    if info and _preview_alive(info["port"]):
+        url = f"http://127.0.0.1:{info['port']}/"
+    else:
+        port = a.port
+        while True:
+            with socket.socket() as s:
+                if s.connect_ex(("127.0.0.1", port)) != 0:
+                    break
+            port += 1
+        flags = 0x00000008 | 0x00000200 if platform.system() == "Windows" else 0
+        proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / "html_preview.py"), str(d), "--port", str(port)],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags, close_fds=True)
+        for _ in range(50):
+            if _preview_alive(port):
+                break
+            time.sleep(0.1)
+        else:
+            return emit({"ok": False, "code": "preview_failed", "summary": "미리보기 서버가 뜨지 않았습니다."})
+        state.write_text(json.dumps({"pid": proc.pid, "port": port}), encoding="utf-8")
+        url = f"http://127.0.0.1:{port}/"
+    if not a.no_open:
+        webbrowser.open(url)
+    return emit({"ok": True, "code": "preview_running", "summary": url, "url": url, "next": "deck.html 을 고치면 화면이 자동으로 새로고침됩니다"})
+
+
+def cmd_html_build(a):
+    """deck.html 에서 바뀐 부분만 원본 PPT 에 반영해 새 버전으로 저장한다."""
+    from proposal_lib import htmldeck
+    from proposal_lib.project import latest_deck, record_version
+    d = expand(a.dir)
+    meta = json.loads((d / "deck.json").read_text(encoding="utf-8"))
+    src = Path(meta["source"])
+    project = expand(a.project) if a.project else (src.parent.parent if src.parent.name == "04_제작" else None)
+    if a.check:
+        r = htmldeck.build(d, None)
+        return emit({"ok": True, "code": "html_checked", "summary": f"반영될 변경 {r['changed']}건 · 바뀐 장 {r['touched_slides']}", **r})
+    last = latest_deck(project) if project and (project / "04_제작").exists() else None
+    if last and src.parent.name == "04_제작" and last.resolve() != src.resolve() and not a.force:
+        return emit({"ok": False, "code": "not_latest", "summary": f"이 작업본은 {src.name} 기준인데 최신 버전은 {last.name} 입니다. PowerPoint 에서 직접 고친 내용이 덮이지 않도록 html-open 으로 최신본을 다시 엽니다 (무시하려면 --force)."})
+    if a.out:
+        dest = expand(a.out)
+    elif last:
+        m = re.search(r"^(.*)_v(\d+)\.pptx$", last.name)
+        dest = last.with_name(f"{m.group(1)}_v{int(m.group(2)) + 1:02d}.pptx")
+    else:
+        return emit({"ok": False, "code": "need_out", "summary": "저장할 파일명을 정할 수 없습니다. --out 04_제작/<건명>_v01.pptx 처럼 지정합니다."})
+    if dest.exists():
+        return emit({"ok": False, "code": "exists", "summary": f"{dest.name} 가 이미 있습니다. 버전 파일은 덮어쓰지 않습니다."})
+    r = htmldeck.build(d, dest)
+    if project and (project / "project.json").exists() and str(dest).startswith(str(project)):
+        record_version(project, dest.relative_to(project), (a.change or "HTML 작업본 반영") + f" (기준: {src.name})")
+    return emit({"ok": True, "code": "html_built", "summary": f"{dest.name} 저장 · 반영 {r['changed']}건 · 바뀐 장 {r['touched_slides']}", "path": str(dest), **r,
+                 "next": f"snapshot \"{dest}\" 로 PowerPoint 화면 확인. 작업본은 새 버전 기준으로 다시 만들어졌습니다"})
 
 
 def cmd_edit(a):
@@ -523,7 +750,13 @@ def main():
     p = sp.add_parser("version-new"); p.add_argument("project"); p.add_argument("--change", required=True); p.add_argument("--base"); p.set_defaults(fn=cmd_version_new)
     p = sp.add_parser("edit"); p.add_argument("file"); p.add_argument("--json", required=True, help='[{"slide":5,"find":"…","replace":"…"}]'); p.set_defaults(fn=cmd_edit)
     p = sp.add_parser("render-check"); p.add_argument("outline"); p.set_defaults(fn=cmd_render_check)
-    p = sp.add_parser("review"); p.add_argument("file"); p.add_argument("--requirements"); p.add_argument("--client"); p.add_argument("--md"); p.set_defaults(fn=cmd_review)
+    p = sp.add_parser("point"); p.add_argument("file"); p.add_argument("--check", action="store_true", help="읽기만 하고 자리·겹침·문구를 보고")
+    p.add_argument("--top", type=float, help="POINT 위치(cm) 직접 지정"); p.add_argument("--width", type=float); p.set_defaults(fn=cmd_point)
+    p = sp.add_parser("html-open"); p.add_argument("file"); p.add_argument("--out", help="작업 폴더 (기본: 04_제작/html/<파일명>)"); p.add_argument("--force", action="store_true"); p.set_defaults(fn=cmd_html_open)
+    p = sp.add_parser("html-new"); p.add_argument("outline"); p.add_argument("--out", required=True, help="작업 폴더"); p.add_argument("--force", action="store_true"); p.add_argument("--client-mark"); p.add_argument("--client-logo"); p.add_argument("--footer-client-logo"); p.add_argument("--cover-image"); p.add_argument("--design"); p.add_argument("--color"); p.set_defaults(fn=cmd_html_new)
+    p = sp.add_parser("html-preview"); p.add_argument("dir"); p.add_argument("--port", type=int, default=8765); p.add_argument("--no-open", action="store_true"); p.add_argument("--stop", action="store_true"); p.set_defaults(fn=cmd_html_preview)
+    p = sp.add_parser("html-build"); p.add_argument("dir"); p.add_argument("--out"); p.add_argument("--project"); p.add_argument("--change"); p.add_argument("--force", action="store_true"); p.add_argument("--check", action="store_true", help="저장하지 않고 반영될 변경만 센다"); p.set_defaults(fn=cmd_html_build)
+    p = sp.add_parser("review");p.add_argument("file"); p.add_argument("--requirements"); p.add_argument("--client"); p.add_argument("--md"); p.set_defaults(fn=cmd_review)
     a = ap.parse_args()
     missing = need_libs() if a.cmd != "doctor" else []
     if missing:
