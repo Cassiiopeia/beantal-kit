@@ -36,6 +36,11 @@ outline.md 형식 (슬라이드 한 장 = '## ' 블록):
       | 항목 | 세부 일정 | 시작 | 끝 | 표시 |
       | 계약 | 계약 체결 | 10월 4W | 10월 4W | |
     - 포인트: 유사 SKU 오출고를 막습니다      (장 하단 POINT 막대, 모든 장 같은 자리 · 결과만)
+    - 배치: 좌1우2 6:4                         (블록 2~3개를 묶는 모양: 좌우 · 상하 · 좌1우2 · 상1하2, 생략하면 자동)
+    - 사진: 곤지암 센터                        (한 칸에 1~4장, 레퍼런스 사진 ref:<id>/<키> 또는 파일 경로)
+      - ref:ably-2603/s11-1 | 센터 외관
+    - 출처: ably-2603 11장                     (가져온 레퍼런스 장, 렌더하지 않음)
+    블록 필드 뒤에 글을 쓰면 블록 위 소제목이 된다:  - 표: 입고 기준  (아래 줄에 표)
     - 상태: 초안
 """
 import re
@@ -50,12 +55,17 @@ TYPES = {
     "C09": "사례/실적", "C10": "보안·증빙", "C11": "정산·단가", "C12": "타임테이블", "C13": "운영조직",
     "L01": "회사 소개", "L02": "회사 소개", "L03": "회사 소개", "L04": "회사 소개", "L05": "회사 소개", "L06": "회사 소개",
 }
-LIST_FIELDS = {"본문", "단계"}
+LIST_FIELDS = {"본문", "단계", "사진"}
 TABLE_FIELDS = {"표", "데이터", "일정"}
 TREE_FIELDS = {"조직"}
 CHART_KINDS = {"": "bar", "막대": "bar", "세로막대": "bar", "bar": "bar", "column": "bar",
                "선형": "line", "꺾은선": "line", "line": "line",
                "원형": "pie", "파이": "pie", "pie": "pie"}
+BLOCK_FIELDS = ("본문", "표", "단계", "데이터", "조직", "일정", "사진")
+# 배치: 한 장에 블록 2~3개를 묶는 모양. h = 좌우로 나란히, v = 위아래, l12 = 왼쪽 1 | 오른쪽 2, t12 = 위 1 / 아래 2
+LAYOUTS = {"좌우": "h", "가로": "h", "상하": "v", "세로": "v", "위아래": "v",
+           "좌1우2": "l12", "좌1우2단": "l12", "상1하2": "t12", "위1아래2": "t12"}
+SINGLE_OK = {"C01", "C07", "C12", "C13"}      # 전용 배치라 한 블록으로 장을 채우는 유형
 NEEDS_HEADER = {k for k in TYPES if k[0] in "CL"}
 REQUIRED_KINDS = ("작성요청", "평가", "SLA", "업무범위")
 
@@ -86,6 +96,10 @@ def parse_outline(text):
                 cur[field] = items
             elif field in TREE_FIELDS:      # 들여쓰기로 상하 관계를 읽으므로 앞 공백을 남긴다
                 cur[field] = [b.rstrip() for b in buf if b.strip().startswith("-")]
+            cap = f"{field}_제목"
+            if not cur[field] and cap in cur:   # '- 본문: 한 줄' 처럼 아래 줄 없이 쓴 값은 소제목이 아니라 내용이다
+                val = cur.pop(cap)
+                cur[field] = [val] if field in LIST_FIELDS else val
         field, buf = None, []
 
     for raw in text.splitlines():
@@ -110,8 +124,10 @@ def parse_outline(text):
             if fm:
                 key, val = fm.group(1).strip(), fm.group(2).strip()
                 target = meta if cur is None else cur
-                if key in LIST_FIELDS | TABLE_FIELDS | TREE_FIELDS and not val:
+                if key in LIST_FIELDS | TABLE_FIELDS | TREE_FIELDS and (not val or cur is not None):
                     field = key
+                    if val:     # '- 표: 입고 기준' → 블록 위 소제목
+                        cur[f"{key}_제목"] = val
                 else:
                     target[key] = val
             continue
@@ -255,10 +271,78 @@ def check_visual_fields(s, where):
     return f
 
 
-def check_visual_mix(slides):
-    """O17: 표만 있는 장이 본문의 절반을 넘거나 3장 이상 이어지면 경고한다."""
+def blocks(s):
+    """장에 든 블록을 outline 에 쓴 순서대로. 이 순서가 왼쪽→오른쪽, 위→아래 배치 순서다."""
+    return [k for k in s if k in BLOCK_FIELDS and s.get(k)]
+
+
+def parse_layout(value):
+    """'좌우 6:4' → ('h', [6, 4]). 비우면 (None, None) = 자동, 모르는 값이면 ('?', None)."""
+    value = (value or "").strip()
+    if not value:
+        return None, None
+    m = re.match(r"^(\S+)\s*(?:(\d+(?:\.\d+)?)\s*[:：]\s*(\d+(?:\.\d+)?)(?:\s*[:：]\s*(\d+(?:\.\d+)?))?)?\s*$", value)
+    if not m or m.group(1) not in LAYOUTS:
+        return "?", None
+    weights = [float(g) for g in m.groups()[1:] if g]
+    return LAYOUTS[m.group(1)], weights or None
+
+
+def photo_items(items):
+    """'- src | 캡션 [| 맞춤]' 목록 → [(src, 캡션, 맞춤여부)]. 맞춤 = 자르지 않고 칸 안에 전부 (도면 · 화면 캡처)."""
+    out = []
+    for it in items or []:
+        parts = [p.strip() for p in it.split("|")]
+        if parts[0]:
+            out.append((parts[0], parts[1] if len(parts) > 1 else "", len(parts) > 2 and parts[2] in ("맞춤", "fit", "전체")))
+    return out
+
+
+def check_references(slides, client=None, others=()):
+    """O21 사진 파일 확인, O22 다른 고객사 이름 (실적 사례로 일부러 쓴 것이면 무시해도 된다)."""
+    from . import refbank
+    f = []
+    client = (client or "").replace(" ", "").lower()
+    names = [n for n in others if n and n.replace(" ", "").lower() not in client and client not in n.replace(" ", "").lower()]
+    for s in slides:
+        if not (s.get("type") or "").startswith("C"):
+            continue
+        for src, _, _ in photo_items(s.get("사진")):
+            if refbank.resolve_photo(src) is None:
+                f.append({"sev": "warn", "slide": s.get("n"), "code": "O21", "msg": f"사진을 찾지 못했습니다: {src} — ref-show 로 키를 확인하거나 ref-index 를 다시 하세요. 렌더에는 빈 칸으로 나옵니다"})
+        if not names:
+            continue
+        blob = " ".join(str(v) for k, v in s.items() if k not in ("출처", "사진", "n", "line"))
+        found = [n for n in names if n in blob]
+        if found and s.get("type") != "C09":
+            f.append({"sev": "warn", "slide": s.get("n"), "code": "O22", "msg": f"다른 고객사 이름 {', '.join(found)} 이(가) 있습니다 — 실적 사례로 쓴 것이 아니면 지우거나 'A사(업종)' 로 바꾸세요"})
+    return f
+
+
+def check_composition(slides):
+    """O20: 한 장 = 블록(표·카드·흐름도·차트) 2~3개 묶음이 기본. 한 블록뿐인 장이 많거나 4개 이상 넣으면 경고."""
+    f = []
     body = [s for s in slides if (s.get("type") or "").startswith("C")]
-    flags = [bool(s.get("표")) and not any(s.get(k) for k in ("단계", "데이터", "일정", "조직")) for s in body]
+    for s in body:
+        n = len(blocks(s))
+        kind, weights = parse_layout(s.get("배치"))
+        if kind == "?":
+            f.append({"sev": "warn", "slide": s.get("n"), "code": "O20", "msg": f"알 수 없는 배치 '{s['배치']}' — 좌우 · 상하 · 좌1우2 · 상1하2 중 하나(비율은 '좌우 6:4')로 쓰세요. 지금은 자동으로 놓습니다"})
+        elif kind in ("l12", "t12") and n != 3:
+            f.append({"sev": "warn", "slide": s.get("n"), "code": "O20", "msg": f"'{s['배치']}' 는 블록 3개일 때만 맞습니다 (지금 {n}개) — 좌우나 상하로 놓습니다"})
+        if n > 3:
+            f.append({"sev": "warn", "slide": s.get("n"), "code": "O20", "msg": f"블록이 {n}개라 글자가 작아집니다 — 3개 이내로 줄이거나 두 장으로 나누세요"})
+    singles = [s for s in body if s.get("type") not in SINGLE_OK and len(blocks(s)) == 1]
+    plain = [s for s in body if s.get("type") not in SINGLE_OK]
+    if len(plain) >= 4 and len(singles) * 2 > len(plain):
+        f.append({"sev": "warn", "slide": None, "code": "O20", "msg": f"본문 {len(plain)}장 중 {len(singles)}장이 블록 하나뿐입니다 — 표·카드('본문:')·흐름도('단계:')·차트('데이터:')를 2~3개씩 묶어 장을 채우세요 (page-types.md 3-2절)"})
+    return f
+
+
+def check_visual_mix(slides):
+    """O17: 표만 있는 장이 본문의 절반을 넘거나 3장 이상 이어지면 경고한다. 표에 카드·흐름도·차트를 곁들인 장은 표만 있는 장이 아니다."""
+    body = [s for s in slides if (s.get("type") or "").startswith("C")]
+    flags = [blocks(s) == ["표"] for s in body]
     f = []
     if len(body) >= 6 and sum(flags) * 2 > len(body):
         f.append({"sev": "warn", "slide": None, "code": "O17", "msg": f"본문 {len(body)}장 중 {sum(flags)}장이 표만 있습니다 — 흐름도('단계:')·차트('데이터:')·타임테이블(C12)로 바꿀 장을 찾으세요"})
@@ -321,6 +405,7 @@ def check_outline(parsed, reqs=None, tone_check=None):
     if nums and nums != sorted(nums):
         f.append({"sev": "warn", "slide": None, "code": "O11", "msg": "슬라이드 번호가 순서대로가 아닙니다"})
     f += check_visual_mix(slides)
+    f += check_composition(slides)
     coverage = None
     if reqs is not None:
         linked = {}

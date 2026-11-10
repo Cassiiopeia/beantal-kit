@@ -16,6 +16,10 @@
   python proposal_cli.py ref-add --client 고객사 --title 건명 --year 2026 --file 최종=<pptx>
   python proposal_cli.py ref-migrate
   python proposal_cli.py ref-digest [<id> ...]
+  python proposal_cli.py ref-index [<id> ...] [--force]
+  python proposal_cli.py ref-search "<문장>" | --requirements <requirements.md> [--photos] [--topic 반품]
+  python proposal_cli.py ref-cases 동원 유한킴벌리 에이블리
+  python proposal_cli.py ref-show <id> <장>
   python proposal_cli.py version-new <프로젝트 폴더> --change "수정 이유"
   python proposal_cli.py edit <vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'
   python proposal_cli.py review <덱.pptx> [--requirements r.md] [--client 고객사] [--md 결과.md]
@@ -236,6 +240,8 @@ def cmd_outline_check(a):
     parsed = ol.parse_outline(ol.load(expand(a.outline)))
     reqs = ol.parse_requirements(ol.load(expand(a.requirements))) if a.requirements else None
     findings, coverage = ol.check_outline(parsed, reqs, tone.check_message)
+    from proposal_lib import refbank
+    findings += ol.check_references(parsed["slides"], parsed["meta"].get("고객사"), refbank.client_names())
     errors = sum(1 for f in findings if f["sev"] == "error")
     return emit({"ok": errors == 0, "code": "checked", "summary": f"슬라이드 {len(parsed['slides'])}장 · 오류 {errors} · 경고 {sum(1 for f in findings if f['sev'] == 'warn')}",
                  "findings": findings, "coverage": coverage, "next": "오류를 고친 뒤 render" if errors else "render"})
@@ -358,7 +364,8 @@ def cmd_render(a):
     if a.project:
         from proposal_lib.project import record_version
         record_version(expand(a.project), out.relative_to(expand(a.project)) if str(out).startswith(str(expand(a.project))) else out, a.change or "render")
-    return emit({"ok": True, "code": "rendered", "summary": f"{r['slides']}장 생성: {out.name}", "path": str(out), **r,
+    tight = f" · 칸보다 내용이 긴 블록 {len(r['tight'])}개(tight)" if r.get("tight") else ""
+    return emit({"ok": True, "code": "rendered", "summary": f"{r['slides']}장 생성: {out.name}{tight}", "path": str(out), **r,
                  "next": f"review \"{out}\""})
 
 
@@ -376,7 +383,7 @@ def cmd_render_check(a):
     deck = read_pptx_python(stream)
     report = rv.review(deck, cfg, None, None, None, None)
     return emit({"ok": True, "code": "render_checked", "summary": report["summary"], "slides": rendered["slides"],
-                 "counts": report["counts"], "findings": report["findings"], "deck": deck})
+                 "counts": report["counts"], "findings": report["findings"], "tight": rendered.get("tight", []), "deck": deck})
 
 
 def cmd_design_list(a):
@@ -725,6 +732,63 @@ def cmd_ref_digest(a):
     return emit({"ok": all(r["ok"] for r in res), "code": "ref_digest", "summary": f"{len(res)}건 처리", "results": res})
 
 
+def _ensure_index(ids=None, force=False):
+    """색인이 없거나 덱이 바뀐 레퍼런스만 다시 색인한다 (DRM 덱은 PowerPoint 경유라 한 덱에 1~2분)."""
+    from proposal_lib import refbank, refs
+    from proposal_lib.htmldeck import plain_copy
+    todo = [p["id"] for p in refs.load()["projects"] if (not ids or p["id"] in ids) and (force or refbank.stale(p["id"]))]
+    return [refbank.build_index(pid, plain_copy) for pid in todo]
+
+
+def cmd_ref_index(a):
+    res = _ensure_index(a.id or None, force=a.force)
+    ok = [r for r in res if r["ok"]]
+    return emit({"ok": len(ok) == len(res), "code": "ref_indexed",
+                 "summary": f"{len(ok)}/{len(res)}건 색인 (사진 {sum(r['images'] for r in ok)}장 · 표 {sum(r['tables'] for r in ok)}개)" if res else "모두 최신입니다",
+                 "results": res, "next": "ref-search \"<요건 문장>\" · ref-cases <고객사> · ref-show <id> <장>"})
+
+
+def _ids(a):
+    return [x for x in (a.refs or "").split(",") if x] or None
+
+
+def cmd_ref_search(a):
+    from proposal_lib import refbank
+    from proposal_lib import outline as ol
+    built = _ensure_index(_ids(a))
+    if a.requirements:
+        reqs = ol.parse_requirements(ol.load(expand(a.requirements)))
+        out = []
+        for r in reqs:
+            q = " ".join(str(v) for k, v in r.items() if k not in ("ID", "분류"))
+            out.append({"id": r.get("ID"), "requirement": q[:120],
+                        "hits": refbank.search(q, _ids(a), a.top, a.photos, a.topic)})
+        found = sum(1 for x in out if x["hits"])
+        return emit({"ok": True, "code": "ref_matched", "summary": f"요건 {len(out)}개 중 {found}개에 참고 장 있음", "indexed": built,
+                     "matches": out, "next": "ref-show <ref> <n> 으로 글·표·사진을 보고, RFP 요구에 맞게 고쳐 outline 에 쓴다"})
+    hits = refbank.search(a.query or "", _ids(a), a.top, a.photos, a.topic)
+    return emit({"ok": True, "code": "ref_found", "summary": f"{len(hits)}장", "indexed": built, "hits": hits,
+                 "next": "ref-show <ref> <n>"})
+
+
+def cmd_ref_cases(a):
+    from proposal_lib import refbank
+    built = _ensure_index(_ids(a))
+    names = a.names or refbank.client_names()
+    res = refbank.cases(names, _ids(a), a.top, a.about)
+    return emit({"ok": True, "code": "ref_cases", "summary": " · ".join(f"{k} {len(v)}장" for k, v in res.items()), "indexed": built,
+                 "cases": res, "next": "ref-show <ref> <n> 으로 사례 장의 수치·표·사진을 확인해 실적 장(C09)에 쓴다"})
+
+
+def cmd_ref_show(a):
+    from proposal_lib import refbank
+    s = refbank.show(a.id, a.n)
+    if not s:
+        return emit({"ok": False, "code": "not_found", "summary": f"{a.id} {a.n}장이 색인에 없습니다", "next": f"ref-index {a.id}"})
+    return emit({"ok": True, "code": "ref_slide", "summary": f"{s['client']} {s['n']}장 · 표 {len(s['tables'])} · 사진 {len(s['images'])}",
+                 **s, "next": "사진은 Read 로 보고 outline 에 '- 사진:' 블록으로 쓴다 (예: ref:<id>/s11-1 | 캡션)"})
+
+
 def main():
     ap = argparse.ArgumentParser(prog="proposal_cli")
     sp = ap.add_subparsers(dest="cmd", required=True)
@@ -751,6 +815,10 @@ def main():
     p = sp.add_parser("ref-add"); p.add_argument("--client", required=True); p.add_argument("--title", required=True); p.add_argument("--year"); p.add_argument("--id"); p.add_argument("--quality", default="reference", choices=["gold", "reference", "wip"]); p.add_argument("--file", action="append", required=True, help="역할=경로 (여러 번)"); p.add_argument("--note"); p.set_defaults(fn=cmd_ref_add)
     sp.add_parser("ref-migrate").set_defaults(fn=cmd_ref_migrate)
     p = sp.add_parser("ref-digest"); p.add_argument("id", nargs="*"); p.set_defaults(fn=cmd_ref_digest)
+    p = sp.add_parser("ref-index", help="레퍼런스 덱의 장별 글·표·사진 색인"); p.add_argument("id", nargs="*"); p.add_argument("--force", action="store_true"); p.set_defaults(fn=cmd_ref_index)
+    p = sp.add_parser("ref-search", help="요건·문장으로 레퍼런스 장 찾기"); p.add_argument("query", nargs="?"); p.add_argument("--requirements"); p.add_argument("--refs", help="id,id"); p.add_argument("--top", type=int, default=5); p.add_argument("--photos", action="store_true", help="사진 있는 장만"); p.add_argument("--topic"); p.set_defaults(fn=cmd_ref_search)
+    p = sp.add_parser("ref-cases", help="고객 사례(동원·유한킴벌리 등)가 들어간 장 찾기"); p.add_argument("names", nargs="*"); p.add_argument("--refs"); p.add_argument("--top", type=int, default=6); p.add_argument("--about", help="RFP 가 강조하는 말 (예: '유통기한 냉장 당일출고')"); p.set_defaults(fn=cmd_ref_cases)
+    p = sp.add_parser("ref-show", help="레퍼런스 한 장의 글·표·사진"); p.add_argument("id"); p.add_argument("n", type=int); p.set_defaults(fn=cmd_ref_show)
     p = sp.add_parser("version-new"); p.add_argument("project"); p.add_argument("--change", required=True); p.add_argument("--base"); p.set_defaults(fn=cmd_version_new)
     p = sp.add_parser("edit"); p.add_argument("file"); p.add_argument("--json", required=True, help='[{"slide":5,"find":"…","replace":"…"}]'); p.set_defaults(fn=cmd_edit)
     p = sp.add_parser("render-check"); p.add_argument("outline"); p.set_defaults(fn=cmd_render_check)

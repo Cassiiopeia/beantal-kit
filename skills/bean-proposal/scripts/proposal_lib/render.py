@@ -16,7 +16,7 @@ from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Cm, Pt
 
 from . import fonts as fontcheck
-from .outline import chart_kind, chart_number, org_layout, org_tree
+from .outline import blocks, chart_kind, chart_number, org_layout, org_tree, parse_layout
 
 DEFAULT_HEADER = {
     "section_label": {"left": 2.8, "top": 0.0, "width": 15.2, "height": 0.7, "size": 11, "font": "label", "color": "muted"},
@@ -347,37 +347,60 @@ def recommended_index(groups, message):
     return None
 
 
-def body_groups(slide, st, items, left, top, width, height, dry=False, message=None):
+def body_groups(slide, st, items, left, top, width, height, dry=False, message=None, fill=False):
+    """fill: 묶음 장의 한 칸을 꽉 채운다. 칸이 좁아 카드가 5.5cm 보다 좁아지면 카드를 세로로 쌓는다."""
     groups = _groups(items)
     if not groups:
         return 0
     titled = [g for g in groups if g["title"]]
+    size = 13 if width >= 14 else 12
     if len(titled) >= 2 and len(groups) <= 4:
         gap = 0.5
         n = len(groups)
-        w = (width - gap * (n - 1)) / n
-        h = min(height, max(MIN_CARD, max(card_height(g, w) for g in groups)))
         rec = recommended_index(groups, message) if message is not None else None
+        hl = lambda i: None if rec is None else i == rec
+        w = (width - gap * (n - 1)) / n
+        # fill 은 칸 크기 그대로 그리고(글자는 칸에 맞춰 줄어든다) 필요한 높이를 돌려줘 넘침을 알린다
+        if fill and w < 5.5:        # 좁은 칸: 세로로 쌓기
+            h = (height - gap * (n - 1)) / n
+            if not dry:
+                for i, g in enumerate(groups):
+                    _card(slide, st, g, left, top + i * (h + gap), width, h, size=size, highlight=hl(i))
+            need = sum(card_height(g, width, size) for g in groups) + gap * (n - 1)
+            return max(height, need * 0.8)
+        need = max(MIN_CARD, max(card_height(g, w, size) for g in groups))
+        if fill:
+            if not dry:
+                for i, g in enumerate(groups):
+                    _card(slide, st, g, left + i * (w + gap), top, w, height, size=size, highlight=hl(i))
+            return max(height, need * 0.8)
+        h = min(height, need)
         if not dry:
             for i, g in enumerate(groups):
-                _card(slide, st, g, left + i * (w + gap), top, w, h, highlight=None if rec is None else i == rec)
+                _card(slide, st, g, left + i * (w + gap), top, w, h, size=size, highlight=hl(i))
         return h
     lines = []
     for g in groups:
         if g["title"]:
             lines.append(f"【 {g['title']} 】")
         lines += [f"· {t}" for t in g["items"]]
+    if fill:        # 칸을 옅은 상자로 채우고 그 안에 글
+        need = lines_needed("\n".join(lines), width - 0.8, size) * size * LINE_H * 1.3 + 0.8
+        if not dry:
+            rect(slide, st, left, top, width, height, LIGHT_FILL)
+            text(slide, st, left + 0.4, top + 0.4, width - 0.8, height - 0.6, lines, size=size, spacing=6)
+        return max(height, need * 0.8)
     need = min(height, lines_needed("\n".join(lines), width, 13) * 13 * LINE_H * 1.3 + 0.4)
     if not dry:
         text(slide, st, left, top, width, need, lines, size=13, spacing=4)
     return need
 
 
-def body_c01(slide, st, items, left, top, width, height, dry=False):
+def body_c01(slide, st, items, left, top, width, height, dry=False, fill=False):
     """핵심 과제 | 대응 역량 2단 + 하단 3대 축. 그룹이 3개가 아니면 일반 카드로."""
     groups = _groups(items)
     if len(groups) != 3 or not all(g["title"] for g in groups):
-        return body_groups(slide, st, items, left, top, width, height, dry)
+        return body_groups(slide, st, items, left, top, width, height, dry, fill=fill)
     gap = 0.5
     axis_h = 3.2
     w = (width - gap) / 2
@@ -400,22 +423,31 @@ def body_c01(slide, st, items, left, top, width, height, dry=False):
     return upper_h + 0.9 + axis_h
 
 
-def body_table(slide, st, rows, left, top, width, height, dry=False):
+def body_table(slide, st, rows, left, top, width, height, dry=False, fill=False):
+    """fill: 칸 높이를 채우도록 본문 행을 늘린다. 좁은 칸에서는 글자를 한 단계 줄이고 줄바꿈만큼 행을 키운다."""
     if not rows:
         return 0
     nrows, ncols = len(rows), max(len(r) for r in rows)
     size = 12 if nrows <= 6 else (11 if nrows <= 9 else 10)
-    row_h = max(0.9, min(1.6, height / nrows))
-    if dry:
-        return row_h * nrows
-    shape = slide.shapes.add_table(nrows, ncols, Cm(left), Cm(top), Cm(width), Cm(row_h * nrows))
-    tbl = shape.table
     first = 0.28 if ncols >= 3 else 0.32
     widths = [width * first] + [width * (1 - first) / (ncols - 1)] * (ncols - 1) if ncols > 1 else [width]
+    if fill:
+        if width < 14:
+            size -= 1
+        need = [max(0.9, max(lines_needed(r[j] if j < len(r) else "", widths[j] - 0.6, size) for j in range(ncols))
+                    * size * LINE_H * 1.15 + 0.35) for r in rows]
+        extra = max(0.0, height - sum(need)) / max(1, nrows - 1)     # 머리 행은 그대로, 남는 높이는 본문 행에
+        heights = [need[0]] + [h + extra for h in need[1:]]     # 옆 블록과 아래 선이 맞게 칸 끝까지
+    else:
+        heights = [max(0.9, min(1.6, height / nrows))] * nrows
+    if dry:
+        return sum(heights)
+    shape = slide.shapes.add_table(nrows, ncols, Cm(left), Cm(top), Cm(width), Cm(sum(heights)))
+    tbl = shape.table
     for j, w in enumerate(widths):
         tbl.columns[j].width = Cm(w)
     for i in range(nrows):
-        tbl.rows[i].height = Cm(row_h)
+        tbl.rows[i].height = Cm(heights[i])
     for i, row in enumerate(rows):
         for j in range(ncols):
             cell = tbl.cell(i, j)
@@ -437,21 +469,57 @@ def body_table(slide, st, rows, left, top, width, height, dry=False):
             else:
                 r.font.color.rgb = st.color("accent") if CHECK.search(val) else st.color("primary" if j == 0 else "text")
                 cell.fill.fore_color.rgb = RGBColor.from_string("FFFFFF" if i % 2 else LIGHT_FILL)
-    return row_h * nrows
+    return sum(heights)
 
 
-def body_steps(slide, st, steps, left, top, width, height, dry=False):
+def _steps_vertical(slide, st, parsed, descs, left, top, width, height, dry):
+    """좁은 칸의 흐름도: 단계를 위에서 아래로. 왼쪽 단계 이름(아래 화살표 모양), 오른쪽 설명."""
+    n = len(parsed)
+    gap = 0.4
+    name_w = min(5.0, width * 0.38)
+    need_rows = [max(1.1, lines_needed("\n".join(d) or " ", width - name_w - 0.8, 11) * 11 * LINE_H * 1.3 + 0.4) for d in descs]
+    row_h = max(max(need_rows), (height - gap * (n - 1)) / n)
+    used = row_h * n + gap * (n - 1)
+    if dry:
+        return used
+    name_size = min(_fit_size(f"{i + 1:02d} {nm}", name_w - 0.4, row_h * 0.5, 13) for i, (nm, _) in enumerate(parsed))
+    for i, (name, _) in enumerate(parsed):
+        y = top + i * (row_h + gap)
+        fill_key = "primary" if i == 0 or st.band() else "accent"
+        box = rect(slide, st, left, y, name_w, row_h, fill_key)
+        label_in(box, st, f"{i + 1:02d} {name}", name_size)
+        if i < n - 1:       # 다음 단계로 가는 작은 아래 삼각형
+            tri = rect(slide, st, left + name_w / 2 - 0.35, y + row_h - 0.01, 0.7, gap * 0.8, fill_key,
+                       shape=MSO_SHAPE.ISOSCELES_TRIANGLE)
+            tri.rotation = 180
+        rect(slide, st, left + name_w + 0.2, y, width - name_w - 0.2, row_h, LIGHT_FILL)
+        if descs[i]:
+            text(slide, st, left + name_w + 0.45, y + 0.15, width - name_w - 0.7, row_h - 0.3, descs[i], size=11,
+                 spacing=3, anchor=MSO_ANCHOR.MIDDLE)
+    return used
+
+
+def body_steps(slide, st, steps, left, top, width, height, dry=False, fill=False, compact=False):
+    """fill: 설명 칸을 칸 높이까지 늘린다. 단계 하나가 3.4cm 보다 좁아지면 위→아래 흐름으로 그린다.
+    compact: 묶음 장에서 위아래로 나눌 때 필요한 높이만 잰다 (최소 카드 높이 없이)."""
     parsed = [(n.strip(), d.strip()) for n, _, d in (s.partition("|") for s in steps)]
     if not parsed:
         return 0
     n = len(parsed)
     gap = 0.25
     w = (width - gap * (n - 1)) / n
+    descs = [[f"· {d.strip()}" for d in re.split(r"\s*;\s*", desc) if d.strip()] for _, desc in parsed]
+    if fill and w < 3.4:
+        return _steps_vertical(slide, st, parsed, descs, left, top, width, height, dry)
     chev_h = 1.5
     name_size = min(_fit_size(f"{i + 1:02d} {nm}", w - 1.4, 0.7, 14) for i, (nm, _) in enumerate(parsed))
-    descs = [[f"· {d.strip()}" for d in re.split(r"\s*;\s*", desc) if d.strip()] for _, desc in parsed]
     need = max([lines_needed("\n".join(d), w - 0.6, 12) for d in descs] + [1]) * 12 * LINE_H * 1.3 + 0.8
-    card_h = min(height - chev_h - 0.3, max(need, MIN_CARD))
+    if compact:
+        card_h = max(need, 2.2)
+    elif fill:
+        card_h = max(need, height - chev_h - 0.3)
+    else:
+        card_h = min(height - chev_h - 0.3, max(need, MIN_CARD))
     if dry:
         return chev_h + 0.3 + card_h
     for i, (name, _) in enumerate(parsed):
@@ -503,7 +571,7 @@ def _cell_text(cell, st, value, size, color, font="body", bold=False, align=PP_A
     _cell_border(cell)
 
 
-def body_timeline(slide, st, rows, periods, left, top, width, height, dry=False):
+def body_timeline(slide, st, rows, periods, left, top, width, height, dry=False, fill=False):
     """타임테이블(간트): 월·주 2단 머리 + 항목 묶음 + 기간 칸 위 화살표 막대.
     rows: [머리, (항목, 세부 일정, 시작, 끝, 표시)...], periods: ['10월 4W', '11월 1W', ...]"""
     data = [r + [""] * (5 - len(r)) for r in rows[1:]]
@@ -613,7 +681,7 @@ def _style_pie(ch, st, palette):
     ch.font.name = st.font("body")
 
 
-def body_chart(slide, st, rows, left, top, width, height, dry=False, kind="bar"):
+def body_chart(slide, st, rows, left, top, width, height, dry=False, kind="bar", fill=False):
     if not rows or len(rows) < 2:
         return 0
     if dry:
@@ -722,7 +790,7 @@ def _org_box(slide, st, node, left, top, width, height):
         r.font.color.rgb = st.color("accent") if CHECK.search(value) else st.color("white" if dark else "text")
 
 
-def body_org(slide, st, items, left, top, width, height, dry=False):
+def body_org(slide, st, items, left, top, width, height, dry=False, fill=False):
     """조직도: 위에서 아래로 뻗는 트리. 팀원이 많으면 말단은 부모 아래 세로로 쌓는다."""
     org = org_layout(org_tree(items))
     if not org["nodes"]:
@@ -758,6 +826,147 @@ def body_org(slide, st, items, left, top, width, height, dry=False):
             x, w = x + 0.7, w - 0.7
         _org_box(slide, st, n, x, y_of(n), w, box_h)
     return used
+
+
+def _photo_cell(slide, st, path, cap, x, y, w, h, fit=False):
+    """사진을 칸에 꽉 차게(비율 유지, 넘치는 쪽을 잘라) 넣고 아래에 캡션 띠. fit 이면 자르지 않고 칸 안 가운데에."""
+    cap_h = 0.8 if cap else 0
+    ph = h - cap_h
+    if path is None:
+        box = rect(slide, st, x, y, w, ph, LIGHT_FILL, line=GRID)
+        label_in(box, st, "[확인 필요: 사진]", 11, color="accent", font="body", bold=False)
+    elif fit:
+        rect(slide, st, x, y, w, ph, "FFFFFF", line=GRID)
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                iw, ih = im.size
+            s = min((w - 0.2) / iw, (ph - 0.2) / ih)
+            pw, pph = iw * s, ih * s
+        except Exception:
+            pw, pph = w - 0.2, ph - 0.2
+        slide.shapes.add_picture(str(path), Cm(x + (w - pw) / 2), Cm(y + (ph - pph) / 2), Cm(pw), Cm(pph))
+    else:
+        pic = slide.shapes.add_picture(str(path), Cm(x), Cm(y), Cm(w), Cm(ph))
+        try:
+            from PIL import Image
+            with Image.open(path) as im:
+                iw, ih = im.size
+            r_img, r_box = iw / ih, w / ph
+            if r_img > r_box:       # 사진이 더 넓다 → 좌우를 자른다
+                c = (1 - r_box / r_img) / 2
+                pic.crop_left = pic.crop_right = c
+            elif r_img < r_box:
+                c = (1 - r_img / r_box) / 2
+                pic.crop_top = pic.crop_bottom = c
+        except Exception:
+            pass
+    if cap:
+        band = rect(slide, st, x, y + ph, w, cap_h, "primary")
+        label_in(band, st, cap, _fit_size(cap, w - 0.4, 0.6, 11), font="emphasis", bold=False)
+
+
+def body_photos(slide, st, items, left, top, width, height, dry=False, fill=False):
+    """사진 1~4장: 1장 = 칸 전체, 2~3장 = 나란히(칸이 세로로 길면 위아래), 4장 = 2×2."""
+    from .outline import photo_items
+    from .refbank import resolve_photo
+    photos = photo_items(items)[:4]
+    if not photos:
+        return 0
+    if not fill:
+        height = min(height, width * 0.5)
+    if dry:
+        return height
+    n, gap = len(photos), 0.3
+    if n == 4:
+        grid = [(c, r) for r in range(2) for c in range(2)]
+        cols, rows = 2, 2
+    elif n > 1 and height > width * 1.1:
+        grid, cols, rows = [(0, i) for i in range(n)], 1, n
+    else:
+        grid, cols, rows = [(i, 0) for i in range(n)], n, 1
+    cw = (width - gap * (cols - 1)) / cols
+    rh = (height - gap * (rows - 1)) / rows
+    for (src, cap, fit), (c, r) in zip(photos, grid):
+        _photo_cell(slide, st, resolve_photo(src), cap, left + c * (cw + gap), top + r * (rh + gap), cw, rh, fit)
+    return height
+
+
+# ---------------------------------------------------------------- 묶음 배치 (한 장에 블록 2~3개)
+
+GRID_GAP = 0.6
+CAP_H = 0.85        # 블록 소제목 줄 높이
+NATURAL = {"단계", "일정"}      # 위아래로 나눌 때 필요한 만큼만 높이를 받는 블록
+
+
+def caption(slide, st, left, top, width, value):
+    """블록 위 소제목: 짧은 색 막대 + 굵은 글."""
+    rect(slide, st, left, top + 0.12, 0.18, 0.5, "accent")
+    text(slide, st, left + 0.35, top, width - 0.35, 0.75, value, size=13, font="emphasis", color="primary", bold=True,
+         anchor=MSO_ANCHOR.MIDDLE)
+
+
+def _wide(s, k):
+    return k == "일정" or (k == "단계" and len(s.get("단계") or []) >= 4)
+
+
+def layout_tree(s, parts):
+    """블록 순서 + '배치:' → 나누기 나무. ('h'|'v', [(자식, 비율|None)...]) 또는 블록 이름.
+    자동: 2개는 좌우(넓은 흐름도·일정이 있으면 위아래), 3개는 좌1우2(넓은 블록이 있으면 그것을 위에 둔 상1하2), 4개 이상은 위아래."""
+    n = len(parts)
+    if n == 1:
+        return parts[0]
+    kind, weights = parse_layout(s.get("배치"))
+    if kind in (None, "?"):
+        kind, weights = None, None
+        wide = [k for k in parts if _wide(s, k)]
+        kind = ("v" if wide else "h") if n == 2 else (("t12" if wide else "l12") if n == 3 else "v")
+        if kind == "t12":
+            parts = [wide[0]] + [k for k in parts if k != wide[0]]
+    if kind in ("l12", "t12") and n != 3:
+        kind = "h" if kind == "l12" else "v"
+    if kind in ("h", "v"):
+        w = weights if weights and len(weights) == n else None
+        return (kind, [(k, w[i] if w else (1 if kind == "h" else None)) for i, k in enumerate(parts)])
+    a, b = (weights[:2] if weights and len(weights) >= 2 else (1, 1)) if kind == "l12" else \
+           (weights[:2] if weights and len(weights) >= 2 else (None, None))
+    if kind == "l12":
+        return ("h", [(parts[0], a), (("v", [(parts[1], None), (parts[2], None)]), b)])
+    return ("v", [(parts[0], a), (("h", [(parts[1], 1), (parts[2], 1)]), b)])
+
+
+def place_tree(node, x, y, w, h, natural_h, out):
+    """나무를 칸으로 나눠 out 에 (블록, x, y, w, h) 를 쌓는다. natural_h(블록, 폭) = 그 폭에서 필요한 높이."""
+    if isinstance(node, str):
+        out.append((node, x, y, w, h))
+        return
+    d, kids = node
+    m = len(kids)
+    if d == "h":
+        avail = w - GRID_GAP * (m - 1)
+        tot = sum(wt for _, wt in kids)
+        cx = x
+        for child, wt in kids:
+            cw = avail * wt / tot
+            place_tree(child, cx, y, cw, h, natural_h, out)
+            cx += cw + GRID_GAP
+        return
+    avail = h - GRID_GAP * (m - 1)
+    if all(wt for _, wt in kids):
+        tot = sum(wt for _, wt in kids)
+        sizes = [avail * wt / tot for _, wt in kids]
+    else:
+        nat = {i: natural_h(c, w) for i, (c, _) in enumerate(kids) if isinstance(c, str) and c in NATURAL}
+        rest = avail - sum(nat.values())
+        others = m - len(nat)
+        if not nat or not others or rest < 3.5 * others:      # 나머지 칸이 너무 납작해지면 똑같이 나눈다
+            sizes = [avail / m] * m
+        else:
+            sizes = [nat[i] if i in nat else rest / others for i in range(m)]
+    cy = y
+    for (child, _), ch in zip(kids, sizes):
+        place_tree(child, x, cy, w, ch, natural_h, out)
+        cy += ch + GRID_GAP
 
 
 # ---------------------------------------------------------------- 유형별 슬라이드
@@ -848,7 +1057,7 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
     hdr = st.header
     body_left, body_top = hdr["message"]["left"], hdr["body_top"]
     body_w, body_h = hdr["message"]["width"], H - body_top - (1.7 if st.design.get("footer_logo") else 1.1)
-    made = []
+    made, tight = [], []
     for s in outline["slides"]:
         if not s.get("type"):
             continue
@@ -892,7 +1101,7 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
         else:
             num, name = _section_parts(s.get("섹션"))
             header(slide, st, num, name, s.get("제목"), s.get("메시지"), client_mark)
-            parts = [k for k in ("본문", "표", "단계", "데이터", "조직", "일정") if s.get(k)]
+            parts = blocks(s)
             if t[0] == "L" and not parts:
                 text(slide, st, body_left, body_top + 2, body_w, 2, "[확인 필요: 회사 소개 라이브러리 장표 삽입 — library.json company-intro]", size=14)
             if t == "C01":
@@ -903,7 +1112,7 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
                 body_fn = body_groups
             periods = [p.strip() for p in re.split(r"[,，]", s.get("기간", "")) if p.strip()]
             kind = chart_kind(s.get("차트")) or "bar"
-            draw = {"본문": body_fn, "표": body_table, "단계": body_steps, "조직": body_org,
+            draw = {"본문": body_fn, "표": body_table, "단계": body_steps, "조직": body_org, "사진": body_photos,
                     "데이터": lambda *a, **k: body_chart(*a, kind=kind, **k),
                     "일정": lambda sl, st_, rows, *a, **k: body_timeline(sl, st_, rows, periods, *a, **k)}
 
@@ -912,18 +1121,39 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
             if point:     # 본문은 POINT 막대 위 0.4cm 에서 끝난다
                 slide_body_h = min(body_h, point_box(st)[1] - 0.4 - body_top)
 
-            def layout(dry, y0):
-                y, remain = y0, slide_body_h - 0.2
-                for i, k in enumerate(parts):
-                    last = i == len(parts) - 1
-                    avail = remain if last else remain * (0.45 if k == "본문" else 0.55)
-                    used = draw[k](slide, st, s[k], body_left, y, body_w, avail, dry=dry)
-                    y += used + 0.5
-                    remain -= used + 0.5
-                return y - y0 - 0.5
-            total = layout(True, 0)
-            free = max(0.0, slide_body_h - 0.2 - total)
-            layout(False, body_top + 0.2 + free * 0.3)   # 남는 공간은 위 30% · 아래 70% 로 나눈다
+            cap_of = lambda k: (s.get(f"{k}_제목") or "").strip()
+
+            if len(parts) >= 2:     # 묶음 장: 블록 2~3개로 본문 영역을 꽉 채운다
+                def natural_h(k, w):
+                    extra = {"compact": True} if k == "단계" else {}
+                    return draw[k](slide, st, s[k], 0, 0, w, slide_body_h, dry=True, **extra) + (CAP_H if cap_of(k) else 0)
+                cells = []
+                place_tree(layout_tree(s, parts), body_left, body_top + 0.2, body_w, slide_body_h - 0.2, natural_h, cells)
+                for k, x, y, w, h in cells:
+                    if cap_of(k):
+                        caption(slide, st, x, y, w, cap_of(k))
+                        y, h = y + CAP_H, h - CAP_H
+                    used = draw[k](slide, st, s[k], x, y, w, h, dry=False, fill=True)
+                    if used > h + 0.15:
+                        tight.append({"n": len(prs.slides), "block": k, "need_cm": round(used, 1), "room_cm": round(h, 1)})
+            else:
+                def layout(dry, y0):
+                    y, remain = y0, slide_body_h - 0.2
+                    for i, k in enumerate(parts):
+                        last = i == len(parts) - 1
+                        if cap_of(k):
+                            if not dry:
+                                caption(slide, st, body_left, y, body_w, cap_of(k))
+                            y += CAP_H
+                            remain -= CAP_H
+                        avail = remain if last else remain * (0.45 if k == "본문" else 0.55)
+                        used = draw[k](slide, st, s[k], body_left, y, body_w, avail, dry=dry)
+                        y += used + 0.5
+                        remain -= used + 0.5
+                    return y - y0 - 0.5
+                total = layout(True, 0)
+                free = max(0.0, slide_body_h - 0.2 - total)
+                layout(False, body_top + 0.2 + free * 0.3)   # 남는 공간은 위 30% · 아래 70% 로 나눈다
             if point:
                 point_bar(slide, st, point)
         if t not in ("T01", "T03"):
@@ -932,4 +1162,5 @@ def render(outline, cfg=None, out_path="deck.pptx", client_mark=None, client_log
             footer(slide, st)
         made.append({"n": len(prs.slides), "outline_n": s.get("n"), "type": t})
     prs.save(out_path)
-    return {"slides": len(prs.slides), "made": made, "font_swaps": st.font_swaps}
+    # tight: 묶음 장에서 칸보다 내용이 긴 블록 — 글을 줄이거나 '배치:' 비율을 바꾼다
+    return {"slides": len(prs.slides), "made": made, "font_swaps": st.font_swaps, "tight": tight}
