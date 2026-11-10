@@ -123,7 +123,7 @@ PYTHON=$(command -v python3 || command -v python)
 | S3 질의 | 모호한 요건 → 고객 질의서 초안 | — | questions.md |
 | S4 분배 | (대형 RFP) 요건을 부서별 확인 요청으로 나누고 회신 반영 | — | 03_부서회신/*.md |
 | S5 설계 | 제안 방향 3대 축 → 목차(=RFP 작성 요청 순서) → 장별 유형·제목·메시지·근거 | `outline-renumber`, `outline-check <outline> --requirements <req>` | strategy.md, outline.md · **G2** |
-| S6 제작 | v01 은 outline 대로 pptx, v02~ 는 최신본 복사 후 수정 | `render <outline> --out 04_제작/<건명>_vNN.pptx --project <폴더> --change "…" [--client-mark 고객사]` | vNN.pptx · **G3** |
+| S6 제작 | 먼저 "HTML 먼저 / 바로 PPT" 를 묻는다. v01 은 outline 대로 pptx, v02~ 는 최신본 복사 후 수정 | `render <outline> --out 04_제작/<건명>_vNN.pptx --project <폴더> --change "…" [--client-mark 고객사]` · HTML: `html-new` / `html-open` → `html-preview` → `html-build` | vNN.pptx · **G3** |
 | S7 점검 | 자동 점검 + 화면 확인 + 6축 채점 | `review <덱> [--requirements …] [--client …] --md 05_점검/review_vNN.md`, `snapshot <덱> [--slides 1,4,9]` | review_vNN.md · **G4** (🟥 0건) |
 | S8 제출 | 제출 서류 체크리스트, 최종본 확정 | `status <폴더>` | checklist.md · **G5** |
 
@@ -137,8 +137,16 @@ PYTHON=$(command -v python3 || command -v python)
 - **POINT 막대**: 본문 장 하단의 한 줄 요약 상자. outline 에 `- 포인트: …` 로 쓰면 렌더러가 **모든 장 같은 자리**(27.5×19.05 기준 위 15.45cm · 좌 1.2cm · 폭 = 슬라이드 폭 − 2.4cm · 높이 1.15cm)에 그리고, 본문은 그 위 0.4cm 에서 끝낸다. 자리는 디자인 `design.point`(`top` · `left` · `width` · `height`)로만 바꾼다. 장마다 다른 자리에 손으로 그리지 않는다. 운영조직(C13, 조직도) 장에는 POINT 를 두지 않는다 — 써도 렌더할 때 빠지고 `outline-check` 가 O16 으로 알린다.
   - 문구 규칙(`references/tone.md` 6절): 화주사가 **얻는 결과** 한 문장(55자 이하). 우리가 하는 작업 과정("빈에 담고 바코드를 붙입니다")은 본문에 이미 있으니 쓰지 않는다. `A → B` 형태도 쓰지 않는다 — 화살표 앞이 과정 설명이 되기 쉽다. 결과만 남긴다. `outline-check` 가 O16 으로 경고한다.
   - 기존 덱: `point <vNN.pptx> --check` 로 자리 다른 장 · 본문과 겹치는 장 · 문구 점검 장을 본다. 맞출 때는 `version-new` 로 새 번호를 만든 뒤 `point <새 vNN.pptx>` 로 모든 POINT 를 같은 자리 · 같은 글자 크기 · 같은 라벨 색으로 옮긴다 (DRM 덱은 PowerPoint 경유, 열려 있는 다른 PowerPoint 창은 닫지 않는다). 본문과 겹친다고 나온 장은 자동으로 줄이지 않으니, 사용자에게 장 번호를 알려 본문을 POINT 위로 올리게 한 뒤 `snapshot` 으로 확인한다.
+- **HTML 작업본** (보면서 고치기): AI 는 PPT 보다 HTML 을 정확히 고친다. 장을 HTML 로 띄워 놓고 고치면 브라우저가 1초 안에 새로고침되고, 다 고치면 PPT 로 되돌린다.
+  - **S6 첫머리에 AskUserQuestion 으로 묻는다**: "HTML 로 먼저 띄워 보면서 고칠까요, 바로 PPT 로 만들까요?" 기존 덱을 고칠 때도 같은 질문을 한다. 고른 대로 진행한다.
+  - 새 덱: `html-new <outline.md> --out 04_제작/html/<건명> [render 와 같은 디자인·로고 옵션]` → `html-preview <작업 폴더>` (브라우저가 열린다).
+  - 기존 덱(DRM 포함): `html-open <최신 vNN.pptx>` → 작업 폴더 `04_제작/html/<파일명>/` → `html-preview <작업 폴더>`.
+  - 고치기: 작업 폴더의 `deck.html` 만 고친다. 장은 `<!-- ===== N쪽 ===== -->` 아래 `<section class="slide">`, 요소는 `data-id` 가 붙은 `.el` 이고 위치·크기는 cm(`left · top · width · height`), 글자는 `<p>` 안 `<span>`. 새 요소는 `data-id` 없이 넣고, 장 순서는 section 순서, 장 삭제는 section 삭제. `data-kind="frozen"`(차트·자유형 그림)은 옮기기·크기만 되고 내용은 PowerPoint 에서 고친다. 색은 `#RRGGBB` 단색만 PPT 로 옮겨진다. `class="layer"` 는 마스터 장식이라 고쳐도 반영되지 않는다.
+  - 되돌리기: `html-build <작업 폴더> --check` 로 반영될 변경 수를 보고, `html-build <작업 폴더> --change "…"` 로 다음 vNN 을 만든다. 바뀐 요소·속성만 원본 복사본에 쓰므로 건드리지 않은 차트·도형·마스터는 원본 그대로다. 저장은 PowerPoint 경유라 DRM 이 정상 적용되고, 작업본은 새 버전 기준으로 다시 만들어진다. 작업본보다 새 버전이 있으면(PowerPoint 에서 직접 고친 경우) `not_latest` 로 멈추니 `html-open` 으로 최신본을 다시 연다.
+  - 저장 뒤 `snapshot` 으로 PowerPoint 화면을 확인한다. HTML 은 브라우저 글꼴 렌더링이라 7pt 이하 작은 글씨는 줄바꿈이 한두 글자 다를 수 있다.
+  - HTML 작업본은 평문이다(DRM 은 Office 파일만 암호화한다). DRM 덱을 처음 HTML 로 열 때는 이 점을 한 번 알리고, 사용자가 허락했으면 작업본을 지우지 않고 계속 쓴다. 미리보기는 이 PC(127.0.0.1)에서만 열리고 `html-preview <폴더> --stop` 으로 끈다.
 - 렌더러로 레이아웃을 바꾼 버전은 `version-new` 대신 `render --project` 로 다음 번호를 만든다. 이때 직전 버전에 PowerPoint 직접 수정이 없었는지(outline.md 저장 시각과 pptx 시각) 먼저 확인한다.
-- v02 이후 수정: `version-new <프로젝트> --change "5장 SLA 수치 수정"` 로 복사한 뒤 `edit <새 vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'` 로 글자를 바꾼다 (slide 0 = 전체 장). DRM 덱도 PowerPoint 경유로 고친다. 최신 버전이 아닌 파일은 `edit` 이 거절한다. 장 추가·삭제·배치 변경처럼 글자 교체로 안 되는 수정은 사용자와 함께 PowerPoint 에서 하고 다음 번호로 저장하게 한다.
+- v02 이후 수정: `version-new <프로젝트> --change "5장 SLA 수치 수정"` 로 복사한 뒤 `edit <새 vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'` 로 글자를 바꾼다 (slide 0 = 전체 장). DRM 덱도 PowerPoint 경유로 고친다. 최신 버전이 아닌 파일은 `edit` 이 거절한다. 장 추가·삭제·배치 변경처럼 글자 교체로 안 되는 수정은 HTML 작업본(`html-open` → `html-build`)으로 하거나, 사용자와 함께 PowerPoint 에서 하고 다음 번호로 저장하게 한다.
 - 변경 이력은 `project.json` 의 `versions` 에 쌓인다 (버전, 날짜, 기준 파일, 바꾼 이유). 새 대화에서 이어 작업할 때는 `status <프로젝트>` 와 이 이력을 먼저 읽는다.
 - `outline-check` 의 커버리지 오류(O12)는 빠진 요건이다. 장을 추가하거나 기존 장 근거에 연결한 뒤 다시 확인한다.
 - `snapshot` 이미지를 Read 로 보고 빈 공간 · 넘침 · 줄바꿈을 확인한다. DRM 덱의 이미지는 시스템 임시 폴더에만 만들고 검토 후 지운다.

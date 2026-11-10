@@ -19,6 +19,10 @@
   python proposal_cli.py version-new <프로젝트 폴더> --change "수정 이유"
   python proposal_cli.py edit <vNN.pptx> --json '[{"slide":5,"find":"…","replace":"…"}]'
   python proposal_cli.py review <덱.pptx> [--requirements r.md] [--client 고객사] [--md 결과.md]
+  python proposal_cli.py html-open <vNN.pptx> [--out 작업폴더]      (HTML 작업본: 기존 덱)
+  python proposal_cli.py html-new <outline.md> --out <작업폴더>     (HTML 작업본: 새 덱)
+  python proposal_cli.py html-preview <작업폴더> [--stop]
+  python proposal_cli.py html-build <작업폴더> [--check] [--change "…"] [--out x.pptx]
 """
 import argparse
 import json
