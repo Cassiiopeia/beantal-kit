@@ -15,6 +15,17 @@ from . import tone
 MEMO_STRONG = re.compile(
     r"(넣기\b|넣을 ?것|해야 ?함|이래서|나눠서|이것저것|받은 것|말을 주면|추후 ?작성|작성 ?예정|확인 후 기재|TBD|TODO|\?\?|"
     r"좌우 나눠|문의\(|수정 ?필요|확인 ?필요함|여기에|넣어야|빼야|바꿔야)")
+TYPED_BULLET = re.compile(r"^([•·▪◦‣※\-]|\d{1,2}[.)]|[①-⑳])\s+\S")
+
+
+def _wraps(text, width_cm, size):
+    """글자 수로 두 줄 이상이 될지 어림한다 (render.lines_needed 와 같은 기준)."""
+    if not width_cm:
+        return False
+    per_line = max(1, int((width_cm - 0.3) / ((size or 12) * 0.0353 * 0.95)))
+    return len(text) > per_line
+
+
 MEMO_LABEL = re.compile(r"^(수정|확인|메모|삭제|추가|검토|TODO|FIXME|수정필요|확인필요)[!\.]?$")
 PLAIN_END = re.compile(r"(?<!니)다\.?$")
 COLLOQUIAL = re.compile(r"(거든|잖아|같음|인듯|듯함|ㅇㅇ|ㅋㅋ)")
@@ -147,6 +158,9 @@ def review(deck, config=None, company=None, known_clients=None, client=None, req
                     add("yellow", "Q10", n, f"오타 의심: '{wrong}' → '{right}'", t)
             if SUPERLATIVE.search(t):
                 add("yellow", "Q13", n, "근거 없는 최상급 표현", t)
+            if (TYPED_BULLET.match(t) and not p.get("hanging") and sh.get("kind") != "placeholder"
+                    and _wraps(t, sh.get("width"), p.get("size"))):
+                add("yellow", "Q14", n, "글머리 둘째 줄이 기호 아래로 튀어나감 — 내어쓰기(첫 글자에 맞춤) 필요", t)
             if "ㆍ" in t:
                 add("green", "Q11", n, "가운뎃점은 'ㆍ'(한글 아래아) 대신 '·' 를 씁니다", t)
             if (p.get("color") or "").upper() in ("FF0000",) and len(t) > 4:

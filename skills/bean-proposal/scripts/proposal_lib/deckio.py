@@ -68,7 +68,10 @@ def _shape_record(sh, MSO):
                         break
                 except Exception:
                     pass
-            paras.append({"text": txt, "size": size, "font": font, "bold": bold, "color": color, "level": p.level})
+            ppr = p._p.pPr
+            ind = ppr.get("indent") if ppr is not None else None
+            paras.append({"text": txt, "size": size, "font": font, "bold": bold, "color": color, "level": p.level,
+                          "hanging": bool(ind and int(ind) < 0)})
         rec["paras"] = paras
         if not rec["text"]:
             rec["text"] = " ".join(x["text"] for x in paras)

@@ -15,6 +15,7 @@ REF_DIR = ROOT / "references"
 REF_JSON = ROOT / "references.json"
 QUALITY = ("gold", "reference", "wip")
 DIGEST_ROLES = ("최종", "틀", "작업중")
+MANUAL = "<!-- 구성 분석 (수작업) -->"
 
 
 def load():
@@ -147,5 +148,10 @@ def digest(project_id, brief_fn, profile_fn, read_fn):
         return {"ok": True, "id": project_id, "digest": None, "message": "요약할 pptx(최종·틀·작업중)가 없습니다"}
     out = REF_DIR / project_id / "digest.md"
     out.parent.mkdir(parents=True, exist_ok=True)
+    # 장 그림을 보고 손으로 쓴 구성 분석(MANUAL 아래)은 다시 만들어도 남긴다
+    if out.exists():
+        old = out.read_text(encoding="utf-8")
+        if MANUAL in old:
+            lines += ["", old[old.index(MANUAL):].rstrip("\n")]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {"ok": True, "id": project_id, "digest": tilde(out), "decks": made}

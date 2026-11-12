@@ -170,6 +170,16 @@ def build_index(pid, plain_copy_fn):
         s["images"] = kept
         blob = " ".join([s["title"], s["text"]] + [" ".join(" ".join(r) for r in t) for t in s["tables"]])
         s["topics"] = topics_of(blob)
+    # 장 그림을 보고 쓴 장별 구성(layout.json: {"장 번호": "구성 설명"})을 붙인다 — 다시 색인해도 남는다
+    lp = refs.REF_DIR / pid / "layout.json"
+    if lp.exists():
+        try:
+            lay = json.loads(lp.read_text(encoding="utf-8"))
+        except ValueError:
+            lay = {}
+        for s in slides:
+            if lay.get(str(s["n"])):
+                s["layout"] = lay[str(s["n"])]
     used = {Path(im["file"]).name for s in slides for im in s["images"]}
     for f in img_dir.iterdir():     # 반복 그림 · 지난 색인의 남은 파일 정리
         if f.name not in used:

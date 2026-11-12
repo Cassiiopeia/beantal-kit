@@ -78,6 +78,38 @@ def _fit_size(text, width_cm, height_cm, size, min_size=9):
     return size
 
 
+BULLET = re.compile(r"^([•·▪◦‣※\-])\s+(.*)$", re.S)
+NUMBERED = re.compile(r"^((?:\d{1,2}[.)])|[①-⑳])\s+")
+
+
+def hang(p, ln, size):
+    """글머리 문단을 내어쓰기로: 둘째 줄부터 글자가 기호 아래가 아니라 첫 글자 위치에서 시작한다.
+    '• 글' 은 PowerPoint 글머리 기호(buChar)로 바꾸고, '1. 글' · '① 글' 은 번호를 둔 채 들여쓰기만 맞춘다.
+    돌려주는 값은 run 에 넣을 글자."""
+    from pptx.oxml.ns import qn
+    m = BULLET.match(ln)
+    num = None if m else NUMBERED.match(ln)
+    if not m and not num:
+        return ln
+    ppr = p._p.get_or_add_pPr()
+    if m:
+        w = Pt(size * 0.9)
+        for tag in ("a:buNone", "a:buAutoNum", "a:buChar", "a:buFont"):
+            for el in ppr.findall(qn(tag)):
+                ppr.remove(el)
+        bf = ppr.makeelement(qn("a:buFont"), {"typeface": "Arial"})
+        bc = ppr.makeelement(qn("a:buChar"), {"char": m.group(1)})
+        ppr.append(bf)
+        ppr.append(bc)
+        body = m.group(2)
+    else:
+        w = Pt(size * (1.25 if num.group(1)[0] in "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳" else 0.6 * len(num.group(1)) + 0.3))
+        body = ln
+    ppr.set("marL", str(int(w)))
+    ppr.set("indent", str(-int(w)))
+    return body
+
+
 def text(slide, st, left, top, width, height, value, size=11, font="body", color="text", bold=False,
          align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, fit=True, spacing=None):
     box = slide.shapes.add_textbox(Cm(left), Cm(top), Cm(width), Cm(height))
@@ -95,7 +127,7 @@ def text(slide, st, left, top, width, height, value, size=11, font="body", color
         if spacing:
             p.space_after = Pt(spacing)
         r = p.add_run()
-        r.text = ln
+        r.text = hang(p, ln, size) if align == PP_ALIGN.LEFT else ln
         r.font.size = Pt(size)
         r.font.name = st.font(font)
         r.font.bold = bold

@@ -180,6 +180,12 @@ AskUserQuestion 으로 묻는다 (추천을 첫 번째에):
 - 역할(role)은 `최종` `초안` `입력(RFP)` `질의` `틀` `부서양식` `작업중` 중 하나다. `최종`·`틀`·`작업중` 의 pptx 만 digest 대상이다.
 - 원본은 옮기거나 지우지 않고 **복사**만 한다. 고객사 자료라 레포와 skill 폴더에는 절대 넣지 않는다.
 - 보관 위치는 `~/.beantal-kit/configs/bean-proposal/references/<id>/` (`원본/` 과 `digest.md`). 설계·스타일 참고가 필요하면 pptx 를 열기 전에 `digest.md` 를 먼저 읽는다 (토큰 절약, DRM 영향 없음).
+- 사용자가 "잘 만든 덱이니 구성을 학습해"라고 하면, 등록(또는 gold 로 올림)한 뒤 `snapshot` 으로 장 그림을 모두 본다. 그다음 두 가지를 손으로 남긴다. 둘 다 다시 색인하거나 다시 요약해도 지워지지 않는다.
+  - `layout.json`(`{"장 번호": "구성 설명"}`): 블록 배치와 이미지·표 활용을 장마다 한 줄로 적는다. `ref-show` 결과의 `layout` 으로 나온다.
+  - `digest.md` 끝의 `<!-- 구성 분석 (수작업) -->` 아래: 디자인, 목차 흐름, 본뜰 패턴을 적는다.
+  - 글자가 그림으로 된 PDF 는 `index.json` 까지 손으로 쓴다 (`manual: true`).
+- 새 덱의 목차와 장 구성을 잡을 때는 `references/page-patterns.md` 와, 구성 분석이 있는 gold 레퍼런스의 digest.md 를 먼저 읽고 본뜬다. 장마다 패턴(P1~P22)을 하나 고른다.
+- 레퍼런스에 RFP(`입력(RFP)`)와 최종 제안서가 함께 있으면 digest.md 의 "RFP → 제안서 대응" 표를 본다. 새 RFP 를 받으면 같은 방식으로 필수 항목 대응표부터 만든다.
 - 등록 후 `status` 가 `conflict` 인 회사 수치가 이 자료에서 드러나면 사용자에게 알린다.
 
 ## 비판 모드
@@ -193,6 +199,7 @@ AskUserQuestion 으로 묻는다 (추천을 첫 번째에):
 |---|---|---|
 | `references/tone.md` | 말투 규칙 (메시지 · 본문 · 기호 · 용어) | S5 메시지를 쓰기 전 |
 | `references/page-types.md` | 덱 뼈대, 페이지 유형 18종, 표현 고르기, 블록 묶음 배치, outline.md 문법 | S5 |
+| `references/page-patterns.md` | 잘 만든 덱에서 배운 덱 흐름(RFP 순서·요약 맨 앞·AS-IS 재분석 → TO-BE), 장 배치 패턴 22종, 다이어그램 종류, 이미지·표 활용 | S4 목차 · S5 장 구성 |
 | `references/artifacts.md` | 폴더 · requirements · strategy · checklist · project.json 규격 | S1~S8 |
 | `references/review-rules.md` | 점검 코드, 6축 채점, 보고 형식 | S7, 비판 모드 |
 
